@@ -1,0 +1,167 @@
+<#
+.SYNOPSIS
+  Downloads the StepMania or ITGmania source code (with all submodules) into .\source
+
+.DESCRIPTION
+  Sources (HTTPS only, hard-coded on purpose):
+    - StepMania : https://github.com/stepmania/stepmania.git
+    - ITGmania  : https://github.com/itgmania/itgmania.git
+
+  Needs git. It uses, in this order:
+    1. git from PATH, Program Files or GitHub Desktop
+    2. a portable MinGit in .\tools\git (downloaded from the official git-for-windows
+       GitHub release, SHA-256 verified) - only if no git is found
+  So you do not need to install anything.
+
+  By default it makes a shallow clone (latest commit only): much smaller and faster, and it is
+  all that is needed to build. Use -FullHistory to download the whole git history.
+
+  The target folder must be empty (or not exist). Nothing is ever overwritten.
+
+.EXAMPLE
+  .\scripts\get-source.ps1                       # asks which game
+  .\scripts\get-source.ps1 -Game itgmania
+  .\scripts\get-source.ps1 -Game stepmania -FullHistory
+  .\scripts\get-source.ps1 -Game itgmania -Target D:\src\itg
+#>
+[CmdletBinding()]
+param(
+    [ValidateSet('', 'stepmania', 'itgmania')]
+    [string]$Game = '',
+
+    # Folder to clone into. Empty = .\source
+    [string]$Target = '',
+
+    [switch]$FullHistory,   # download the whole git history (slower, larger)
+    [switch]$UseMinGit      # ignore any installed git and use the portable MinGit
+)
+
+$ErrorActionPreference = 'Stop'
+$ProgressPreference    = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$scriptsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$root       = Split-Path -Parent $scriptsDir          # builder folder (this script lives in <builder>\scripts)
+if (-not $Target) { $Target = Join-Path $root 'source' }
+
+. (Join-Path $scriptsDir 'progress.ps1')
+
+$games = [ordered]@{
+    stepmania = @{ Name = 'StepMania'; Url = 'https://github.com/stepmania/stepmania.git'; Size = 'about 600 MB' }
+    itgmania  = @{ Name = 'ITGmania';  Url = 'https://github.com/itgmania/itgmania.git';   Size = 'about 600 MB' }
+}
+
+# ---------------------------------------------------------------- git discovery
+function Find-Git {
+    param([switch]$IgnoreSystem)
+    if (-not $IgnoreSystem) {
+        $c = Get-Command git.exe -ErrorAction SilentlyContinue
+        if ($c) { return $c.Source }
+        foreach ($p in @("$env:ProgramFiles\Git\cmd\git.exe", "${env:ProgramFiles(x86)}\Git\cmd\git.exe", "$env:LOCALAPPDATA\Programs\Git\cmd\git.exe")) {
+            if ($p -and (Test-Path $p)) { return $p }
+        }
+        $gh = Get-ChildItem "$env:LOCALAPPDATA\GitHubDesktop" -Directory -Filter 'app-*' -ErrorAction SilentlyContinue |
+              Sort-Object { try { [version]($_.Name -replace '^app-', '') } catch { [version]'0.0' } } -Descending |
+              ForEach-Object { Join-Path $_.FullName 'resources\app\git\cmd\git.exe' } |
+              Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($gh) { return $gh }
+    }
+    $local = Join-Path $root 'tools\git\cmd\git.exe'
+    if (Test-Path $local) { return $local }
+    return $null
+}
+
+function Install-MinGit {
+    Step 'No git found: downloading portable MinGit (official git-for-windows release)'
+    $rel = Invoke-RestMethod 'https://api.github.com/repos/git-for-windows/git/releases/latest' -Headers @{ 'User-Agent' = 'sm-builder'; Accept = 'application/vnd.github+json' }
+    $a = $rel.assets | Where-Object { $_.name -match '^MinGit-[\d\.]+-64-bit\.zip$' } | Select-Object -First 1
+    if (-not $a) { throw "MinGit 64-bit asset not found in git-for-windows $($rel.tag_name)" }
+    if ($a.browser_download_url -notmatch '^https://github\.com/git-for-windows/') { throw "Unexpected URL: $($a.browser_download_url)" }
+    if ($a.digest -notmatch '^sha256:(.+)$') { throw "No SHA-256 published for $($a.name); refusing to download without verification." }
+    $sha = $Matches[1]
+    $tools = Join-Path $root 'tools'
+    New-Item -ItemType Directory -Force $tools | Out-Null
+    $zip = Join-Path $tools $a.name
+    Write-Host ("    {0} ({1}, {2:N0} MB)" -f $a.name, $rel.tag_name, ($a.size / 1MB))
+    if ((Invoke-Curl -Url $a.browser_download_url -Dest $zip -Bar) -ne 0) { throw "Download failed: $($a.browser_download_url)" }
+    Write-Host '    Verifying...'
+    $h = (Get-FileHash $zip -Algorithm SHA256).Hash
+    if ($h -ine $sha) { Remove-Item $zip -Force; throw "SHA-256 MISMATCH for $($a.name)`n  expected: $sha`n  got:      $h" }
+    Ok 'SHA-256 verified'
+    $dest = Join-Path $tools 'git'
+    if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+    Expand-ZipWithBar -Zip $zip -DestRoot $dest -Label 'Extracting git'
+    Remove-Item $zip -Force
+    $git = Join-Path $dest 'cmd\git.exe'
+    if (-not (Test-Path $git)) { throw 'MinGit extracted, but cmd\git.exe was not found.' }
+    return $git
+}
+
+# ---------------------------------------------------------------- choose the game
+if (-not $Game) {
+    if ([Console]::IsInputRedirected) { throw "No -Game given and no console to ask. Use: get-source.ps1 -Game stepmania|itgmania" }
+    Write-Host ''
+    Write-Host 'Which source code do you want to download?' -ForegroundColor Cyan
+    Write-Host ("  [1] StepMania  (github.com/stepmania/stepmania, {0})" -f $games['stepmania'].Size)
+    Write-Host ("  [2] ITGmania   (github.com/itgmania/itgmania, {0})" -f $games['itgmania'].Size)
+    Write-Host '  [Q] Quit'
+    $ans = (Read-Host 'Choice').Trim().ToLower()
+    switch ($ans) { '1' { $Game = 'stepmania' } '2' { $Game = 'itgmania' } default { Write-Host 'Cancelled.'; exit 2 } }
+}
+$g = $games[$Game]
+
+# ---------------------------------------------------------------- target folder
+$Target = [IO.Path]::GetFullPath($Target).TrimEnd('\')
+$existed = Test-Path $Target
+if (-not (Test-DirIsEmpty $Target)) {
+    throw "Target folder is not empty: $Target`nRename or empty it first (nothing is overwritten)."
+}
+# A folder that only holds a placeholder file (e.g. put-stepmania-here.txt) counts as empty, but git cannot
+# clone into a non-empty folder: clone next to it and move the result in (the placeholder is left alone).
+$hasPlaceholder = $existed -and ((Get-ChildItem $Target -Force | Measure-Object).Count -gt 0)
+$cloneTo = $Target
+if ($hasPlaceholder) {
+    $cloneTo = Join-Path (Split-Path $Target -Parent) ('.' + (Split-Path $Target -Leaf) + '-download')
+    if (Test-Path $cloneTo) { Remove-Item $cloneTo -Recurse -Force }    # leftover of a failed attempt
+}
+
+# ---------------------------------------------------------------- git
+$git = Find-Git -IgnoreSystem:$UseMinGit
+if (-not $git) { $git = Install-MinGit }
+Write-Host ("Using git: {0}  ({1})" -f $git, ((& $git --version) -join ' '))
+
+# ---------------------------------------------------------------- clone
+Step ("Downloading {0} source into {1}" -f $g.Name, $Target)
+$mode = if ($FullHistory) { 'full history' } else { 'shallow: latest commit only' }
+Write-Host "    $($g.Url)  ($mode, with submodules; $($g.Size))"
+$cloneArgs = @('-c', 'core.longpaths=true', 'clone', '--recurse-submodules')
+if (-not $FullHistory) { $cloneArgs += @('--depth', '1', '--shallow-submodules') }
+$cloneArgs += @($g.Url, $cloneTo)
+
+Write-Host '    This usually takes 1-3 minutes depending on your connection. git shows its own progress below'
+Write-Host '    (Receiving objects / Resolving deltas / one block per submodule). It is working, not stuck.'
+Write-Host ''
+$cloneArgs += '--progress'      # show progress even when the output is not a terminal
+$sw = [Diagnostics.Stopwatch]::StartNew()
+# git prints its progress on stderr, straight to the console; do not let PowerShell treat that as an error
+$prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+& $git @cloneArgs
+$code = $LASTEXITCODE
+$ErrorActionPreference = $prevEap
+if ($code -ne 0) {
+    # Do not leave a half-downloaded source behind (it would block the next attempt)
+    if (Test-Path $cloneTo) { Get-ChildItem $cloneTo -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue }
+    if ((-not $existed -or $hasPlaceholder) -and (Test-Path $cloneTo)) { Remove-Item $cloneTo -Force -ErrorAction SilentlyContinue }
+    throw "git clone failed (code $code). Check your internet connection and try again."
+}
+$sw.Stop()
+if ($hasPlaceholder) {
+    # same drive: moving is just a rename, so it is instant
+    Get-ChildItem $cloneTo -Force | ForEach-Object { Move-Item -LiteralPath $_.FullName -Destination $Target -Force }
+    Remove-Item $cloneTo -Recurse -Force
+}
+Write-Host "`n    Download finished. Checking the result..."
+$hash = (& $git -C $Target rev-parse --short HEAD) -join ''
+$mb = [math]::Round((Get-ChildItem $Target -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1MB)
+$global:LASTEXITCODE = 0
+Write-Host ("`n{0} source ready in {1}  (commit {2}, {3} MB, {4:N0} s)" -f $g.Name, $Target, $hash, $mb, $sw.Elapsed.TotalSeconds) -ForegroundColor Green
