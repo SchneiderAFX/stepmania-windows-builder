@@ -21,7 +21,7 @@ A small Windows toolkit to build [StepMania](https://github.com/stepmania/stepma
    .\setup-toolchain.ps1
    ```
 
-   Add `-SkipDefender` to skip the Microsoft Defender scan (it can take several minutes).
+   Or just double-click `setup-toolchain.bat`. Add `-SkipDefender` to skip the Microsoft Defender scan (it can take several minutes), e.g. `setup-toolchain.bat -SkipDefender`.
 
 2. **Put the StepMania source in `.\source`**
    The folder that contains `CMakeLists.txt`, `src`, `Themes`... can be directly in `source\` or inside one subfolder (e.g. `source\stepmania\`). A `.git` folder is not needed (it is ignored).
@@ -47,8 +47,8 @@ stepmania-build\
   _work\                  <- internal: working copy + build objects (safe to delete, see below)
   stepmania-MMDDYYYY\     <- the clean build (output)
   build.ps1  build.bat    <- the builder
-  setup-toolchain.ps1     <- downloads and verifies the toolchain
-  verify-toolchain.ps1    <- checks the toolchain was not tampered with
+  setup-toolchain.ps1  .bat  <- downloads and verifies the toolchain
+  verify-toolchain.ps1 .bat  <- checks the toolchain was not tampered with
 ```
 
 ## What a clean build contains
@@ -88,7 +88,7 @@ StepMania's CMake writes the executable into `<source>\Program`, so building in 
 3. writes `toolchain\inventory.json` with the SHA-256 of every file, so tampering can be detected later;
 4. optionally scans the folder with Microsoft Defender.
 
-`build.ps1` re-checks the key tools (`cl`, `link`, `rc`, `mt`, `cmake`, `ninja`) against the inventory before every build, and `.\verify-toolchain.ps1` checks the whole folder.
+`build.ps1` re-checks the key tools (`cl`, `link`, `rc`, `mt`, `cmake`, `ninja`) against the inventory before every build, and `.\verify-toolchain.ps1` (or double-click `verify-toolchain.bat`) checks the whole folder.
 
 Notes:
 - The Windows SDK "Store Apps Tools" package is not installed in full (it contains unsigned MSIX/Store tools); only `rc.exe`, `rcdll.dll`, `mt.exe` and its dependency are kept.
