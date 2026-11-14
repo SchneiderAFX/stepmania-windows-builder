@@ -5,8 +5,9 @@ rem ============================================================================
 rem  SETTINGS - edit the values below, save this file, then double-click it.
 rem
 rem  Downloads the StepMania or ITGmania source code, or another repository such as
-rem  a fork (with all submodules) into .\source. You do NOT need git installed: if it is missing, a portable one is
-rem  downloaded and verified automatically. The target folder must be empty.
+rem  a fork (with all submodules), into its own folder inside .\source
+rem  (source\stepmania, source\itgmania, source\<fork name>). You do NOT need git
+rem  installed: if it is missing, a portable one is downloaded and verified automatically.
 rem
 rem  Anything you type after "2. get-source.bat" on the command line is added at the end
 rem  and wins over these settings, e.g.:   "2. get-source.bat" -Game itgmania
@@ -24,7 +25,13 @@ rem Leave empty to use GAME / the menu. Only use repositories you trust: the bui
 rem checks the toolchain, not the source code.
 set "REPO_URL="
 
-rem Folder to download into. Empty = .\source
+rem Name of the folder inside source\ for this download. Empty = the repository name
+rem (source\stepmania, source\itgmania, source\<fork name>). Each source gets its own
+rem folder, so you can keep several. If the folder already exists you are asked whether
+rem to keep it (and download with another name) or delete it.
+set "FOLDER_NAME="
+
+rem Advanced: exact folder to download into instead (it must be empty). Empty = as above.
 set "TARGET="
 
 rem --- On/off options: 1 = yes, 0 = no -----------------------------------------
@@ -50,6 +57,7 @@ rem (PowerShell does not accept the same option twice).
 rem -Game and -Url exclude each other, so typing either one clears both settings.
 echo %* | findstr /i /c:"-Game" >nul && set "GAME=" && set "REPO_URL="
 echo %* | findstr /i /c:"-Url" >nul && set "GAME=" && set "REPO_URL="
+echo %* | findstr /i /c:"-FolderName" >nul && set "FOLDER_NAME="
 echo %* | findstr /i /c:"-Target" >nul && set "TARGET="
 echo %* | findstr /i /c:"-FullHistory" >nul && set "FULL_HISTORY=0"
 echo %* | findstr /i /c:"-UseMinGit" >nul && set "USE_MINGIT=0"
@@ -60,6 +68,7 @@ if defined REPO_URL (
 ) else if defined GAME (
     set ARGS=%ARGS% -Game %GAME%
 )
+if defined FOLDER_NAME set ARGS=%ARGS% -FolderName "%FOLDER_NAME%"
 if defined TARGET set ARGS=%ARGS% -Target "%TARGET%"
 if "%FULL_HISTORY%"=="1" set ARGS=%ARGS% -FullHistory
 if "%USE_MINGIT%"=="1" set ARGS=%ARGS% -UseMinGit

@@ -11,24 +11,34 @@ rem ============================================================================
 rem Build configuration: Release | Debug | RelWithDebInfo | MinSizeRel
 set "CONFIG=Release"
 
-rem Name of the output folder: GAME-NAME (GAME is stepmania or itgmania, detected from the source).
+rem Name of the output folder: SOURCE-NAME (SOURCE is the name of the source folder,
+rem e.g. stepmania, itgmania or your fork's name).
 rem Leave empty to use today's date in US format (e.g. itgmania-MMddyyyy).
 set "NAME="
 
-rem Folder with the StepMania/ITGmania source code. Leave empty to use .\source
+rem Which source to build: the name of a folder inside source\ (e.g. itgmania or
+rem stepmania-fixes), or a full path. Leave empty to build the only one there or, when
+rem there are several, to choose from a menu (Enter = the last one you built).
 set "SOURCE="
 
-rem What to do when the source folder is EMPTY:
-rem   (empty)   = show a menu and ask which game to download
-rem   stepmania = download StepMania into the source folder without asking
-rem   itgmania  = download ITGmania into the source folder without asking
-rem It never downloads into a folder that already has files.
+rem What to do when there is NO source at all:
+rem   (empty)   = show a menu and ask what to download
+rem   stepmania = download StepMania into source\stepmania without asking
+rem   itgmania  = download ITGmania into source\itgmania without asking
 set "DOWNLOAD="
 
 rem --- On/off options: 1 = yes, 0 = no -----------------------------------------
 
 rem Launch the game when the build finishes.
 set "RUN=0"
+
+rem After a successful build, delete the internal _work folder (working copy + build cache)?
+rem   ask = ask at the end (Enter = keep it)
+rem   yes = delete it without asking: tidier, but the NEXT build is slower because it
+rem         compiles everything again (a few minutes)
+rem   no  = keep it without asking: the next build only recompiles what you changed
+rem         (much faster while you are testing changes in the code)
+set "DELETE_WORK=ask"
 
 rem Rebuild everything from scratch (slow). Needed once after moving/renaming this folder.
 set "CLEAN=0"
@@ -66,6 +76,8 @@ echo %* | findstr /i /c:"-SyncOnly" >nul && set "SYNC_ONLY=0"
 echo %* | findstr /i /c:"-NoPackage" >nul && set "NO_PACKAGE=0"
 echo %* | findstr /i /c:"-NoPortable" >nul && set "NO_PORTABLE=0"
 echo %* | findstr /i /c:"-SkipVerify" >nul && set "SKIP_VERIFY=0"
+echo %* | findstr /i /c:"-KeepWork" >nul && set "DELETE_WORK="
+echo %* | findstr /i /c:"-DeleteWork" >nul && set "DELETE_WORK="
 
 set ARGS=
 if defined CONFIG set ARGS=%ARGS% -Config %CONFIG%
@@ -78,6 +90,7 @@ if "%SYNC_ONLY%"=="1" set ARGS=%ARGS% -SyncOnly
 if "%NO_PACKAGE%"=="1" set ARGS=%ARGS% -NoPackage
 if "%NO_PORTABLE%"=="1" set ARGS=%ARGS% -NoPortable
 if "%SKIP_VERIFY%"=="1" set ARGS=%ARGS% -SkipVerify
+if defined DELETE_WORK set ARGS=%ARGS% -DeleteWork %DELETE_WORK%
 
 echo Running: build.ps1 %ARGS% %*
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build.ps1" %ARGS% %*

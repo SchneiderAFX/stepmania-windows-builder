@@ -1,17 +1,19 @@
 <#
 .SYNOPSIS
   Builds StepMania or ITGmania from .\source and produces a CLEAN, ready-to-play build
-  in .\stepmania-MMDDYYYY or .\itgmania-MMDDYYYY
+  in .\<source name>-MMDDYYYY (e.g. stepmania-11142026)
 
 .DESCRIPTION
   Workflow:
-    1. Put the source code in .\source (this script NEVER modifies it). If .\source is empty, the
-       script offers to download StepMania or ITGmania for you (see get-source.ps1).
+    1. Put the source code in .\source (this script NEVER modifies it): one folder per source
+       (source\stepmania, source\itgmania, source\my-fork...) or a single source directly in .\source.
+       If .\source is empty, the script offers to download one for you (see get-source.ps1).
+       With several sources it asks which one to build (Enter = the last one built).
     2. Run "3. build.bat" (or scripts\build.ps1). The game (StepMania / ITGmania) is detected automatically. Internally it:
-         - mirrors .\source (without .git) to .\_work\stepmania   (the game's CMake writes the .exe
+         - mirrors the source (without .git) to .\_work\<name>\stage   (the game's CMake writes the .exe
            into <source>\Program, which is why the build is done on a copy)
-         - compiles with CMake + Ninja + MSVC into .\_work\build\<Config>   (incremental)
-         - packages a clean build into  .\<game>-MMDDYYYY   (US date format)
+         - compiles with CMake + Ninja + MSVC into .\_work\<name>\build\<Config>   (incremental)
+         - packages a clean build into  .\<name>-MMDDYYYY   (US date format)
     3. The clean build contains ONLY what a ready-to-play build ships with:
          Program\ (the .exe, its .vdi, DLLs), portable.ini and the data folders
          (Announcers, BackgroundEffects, BackgroundTransitions, BGAnimations, Characters, Courses,
@@ -31,6 +33,7 @@
   .\scripts\build.ps1                       # incremental build -> .\stepmania-11082026 (or .\itgmania-11082026)
   .\scripts\build.ps1 -Download itgmania    # if .\source is empty, download ITGmania there, then build it
   .\scripts\build.ps1 -Run                  # build, package and launch the game from the clean folder
+  .\scripts\build.ps1 -Source itgmania      # build source\itgmania without asking
   .\scripts\build.ps1 -Name finished        # -> .\stepmania-finished (or .\itgmania-finished)
   .\scripts\build.ps1 -Clean                # rebuild everything from scratch (also needed after moving/renaming this folder)
   .\scripts\build.ps1 -SyncOnly             # only refresh the internal working copy
@@ -40,7 +43,8 @@ param(
     [ValidateSet('Release', 'Debug', 'RelWithDebInfo', 'MinSizeRel')]
     [string]$Config = 'Release',
 
-    # Source code (read-only). Empty = .\source
+    # Source code (read-only): the NAME of a folder inside .\source (e.g. stepmania-fixes) or a path.
+    # Empty = the only source in .\source, or a menu when there are several.
     [string]$Source = '',
 
     # If the source folder is empty: download this game into it without asking.
@@ -50,7 +54,7 @@ param(
     # Internal folder holding the working copy and build objects. Empty = .\_work
     [string]$Work = '',
 
-    # Name of the final folder: <game>-<Name>. Empty = US date (MMddyyyy)
+    # Name of the final folder: <source name>-<Name>. Empty = US date (MMddyyyy)
     [string]$Name = '',
 
     # Only used without .\toolchain. Empty = auto-detect the newest Visual Studio.
@@ -60,10 +64,18 @@ param(
 
     [switch]$NoPortable, # ignore .\toolchain and use the installed Visual Studio
     [switch]$SkipVerify, # skip the quick integrity check of the portable toolchain
-    [switch]$Clean,      # delete _work\build\<Config> before building
+    [switch]$Clean,      # delete _work\<source name>\build\<Config> before building
     [switch]$SyncOnly,   # only copy the source, do not build
     [switch]$NoPackage,  # build but do not create the clean folder
-    [switch]$Run         # launch the exe when done
+    [switch]$Run,        # launch the exe when done
+
+    # After a successful build, delete _work\<source> (working copy + build cache)?
+    #   ask = ask at the end (default; Enter or no console = keep)
+    #   yes = delete without asking (tidier, but the next build compiles everything again)
+    #   no  = keep without asking (the next build only recompiles what changed)
+    [ValidateSet('ask', 'yes', 'no')]
+    [string]$DeleteWork = 'ask',
+    [switch]$KeepWork    # same as -DeleteWork no
 )
 
 $ErrorActionPreference = 'Stop'
@@ -95,9 +107,12 @@ function Invoke-CMakeBuild {
     return $LASTEXITCODE
 }
 
-Set-Steps 5
+# Deleting _work is only offered after a complete build + package (with -NoPackage the game only exists in _work)
+if ($KeepWork) { $DeleteWork = 'no' }
+$offerDelete = ($DeleteWork -ne 'no') -and -not $SyncOnly -and -not $NoPackage
+Set-Steps (5 + [int]$offerDelete + [int][bool]$Run)
 
-if (-not $Source) { $Source = Join-Path $Root 'source' }
+$SourceRoot = Join-Path $Root 'source'
 if (-not $Work)   { $Work   = Join-Path $Root '_work' }
 
 # ---- git discovery (only used to stamp the game version with the commit hash) ----
@@ -115,36 +130,116 @@ function Find-Git {
 }
 
 # ---- Locate the source ----------------------------------------------------
-# Accept the source directly in source\  OR inside ONE subfolder (e.g. source\stepmania\)
-function Resolve-SourceDir([string]$dir) {
-    if (-not (Test-Path $dir)) { return $null }
-    if (Test-Path (Join-Path $dir 'CMakeLists.txt')) { return $dir }
-    $sub = @(Get-ChildItem $dir -Directory -ErrorAction SilentlyContinue |
-             Where-Object { (Test-Path (Join-Path $_.FullName 'CMakeLists.txt')) -and (Test-Path (Join-Path $_.FullName 'src')) })
-    if ($sub.Count -eq 1) { Write-Host "Source found in subfolder: $($sub[0].FullName)" -ForegroundColor Yellow; return $sub[0].FullName }
-    if ($sub.Count -gt 1) { throw "Several folders with source code found in '$dir' ($($sub.Name -join ', ')). Leave only one or use -Source <path>." }
-    return $null
+# source\ can hold several sources side by side, one per subfolder (source\stepmania, source\itgmania,
+# source\my-fork...; get-source.ps1 downloads into a subfolder), or a single source pasted directly in it.
+$SourceRootFull = [IO.Path]::GetFullPath($SourceRoot).TrimEnd('\')
+# Remembers the last source built (default of the menu). Kept in scripts\ because _work can be deleted.
+$lastFile = Join-Path $PSScriptRoot '.last-source'
+
+function Get-GameName([string]$dir) {
+    # StepMania or ITGmania, from SM_EXE_NAME in StepmaniaCore.cmake
+    $n = 'StepMania'
+    $core = Join-Path $dir 'StepmaniaCore.cmake'
+    if (Test-Path -LiteralPath $core) {
+        $m = Select-String -LiteralPath $core -Pattern 'set\(SM_EXE_NAME\s+"([^"]+)"' | Select-Object -First 1
+        if ($m) { $n = $m.Matches[0].Groups[1].Value }
+    }
+    return $n
 }
 
-$resolved = Resolve-SourceDir $Source
-if (-not $resolved) {
-    $isEmpty = Test-DirIsEmpty $Source    # also true for a folder that only has a placeholder like put-stepmania-here.txt
-    $canAsk  = -not [Console]::IsInputRedirected
-    if ($isEmpty -and ($Download -or $canAsk)) {
-        Write-Host "`nNo StepMania/ITGmania source code found in: $Source" -ForegroundColor Yellow
-        & (Join-Path $PSScriptRoot 'get-source.ps1') -Target $Source -Game $Download
-        if ($LASTEXITCODE -eq 2) { Write-Host 'Nothing to build. Paste your source code into that folder and run again.'; exit 2 }
-        $resolved = Resolve-SourceDir $Source
+function Get-SourceList([string]$dir) {
+    # The folder itself if it is a source, otherwise every subfolder that is one. Objects: Name, Path, Game.
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return @() }
+    $full = (Get-Item -LiteralPath $dir).FullName.TrimEnd('\')
+    if (Test-Path -LiteralPath (Join-Path $full 'CMakeLists.txt')) {
+        $game = Get-GameName $full
+        # pasted directly in source\: named after the game (stepmania / itgmania), like before
+        $nm = if ($full -ieq $SourceRootFull) { ($game.ToLower() -replace '[^a-z0-9]+', '-').Trim('-') } else { Split-Path $full -Leaf }
+        return @([pscustomobject]@{ Name = $nm; Path = $full; Game = $game })
     }
-    if (-not $resolved) {
+    return @(Get-ChildItem -LiteralPath $full -Directory -ErrorAction SilentlyContinue |
+             Where-Object { (Test-Path -LiteralPath (Join-Path $_.FullName 'CMakeLists.txt')) -and (Test-Path -LiteralPath (Join-Path $_.FullName 'src')) } |
+             Sort-Object Name |
+             ForEach-Object { [pscustomobject]@{ Name = $_.Name; Path = $_.FullName; Game = (Get-GameName $_.FullName) } })
+}
+
+# -Source: a folder (a source, or a folder of sources), or the NAME of a folder inside source\
+if ($Source) {
+    if (Test-Path -LiteralPath $Source -PathType Container) { $base = $Source }
+    elseif (Test-Path -LiteralPath (Join-Path $SourceRoot $Source) -PathType Container) { $base = Join-Path $SourceRoot $Source }
+    else { throw "Source not found: '$Source'. It is not a folder, and source\ has no folder with that name." }
+} else { $base = $SourceRoot }
+$base = [IO.Path]::GetFullPath($base).TrimEnd('\')
+$isDefaultRoot = $base -ieq $SourceRootFull
+
+$list = @(Get-SourceList $base)
+$justDownloaded = $false
+if (-not $list.Count) {
+    $isEmpty = Test-DirIsEmpty $base    # also true for a folder that only has a placeholder like put-stepmania-here.txt
+    $canAsk  = -not [Console]::IsInputRedirected
+    if (($isEmpty -or $isDefaultRoot) -and ($Download -or $canAsk)) {
+        Write-Host "`nNo StepMania/ITGmania source code found in: $base" -ForegroundColor Yellow
+        if ($isDefaultRoot) { & (Join-Path $PSScriptRoot 'get-source.ps1') -SourceRoot $base -Game $Download }
+        else                { & (Join-Path $PSScriptRoot 'get-source.ps1') -Target $base -Game $Download }
+        if ($LASTEXITCODE -eq 2) { Write-Host 'Nothing to build. Download or paste your source code and run again.'; exit 2 }
+        $list = @(Get-SourceList $base)
+        $justDownloaded = $true
+    }
+    if (-not $list.Count) {
         if ($isEmpty) {
-            throw "No source code in '$Source'. Run 2. get-source.bat (or build.ps1 -Download stepmania|itgmania) to download it, or paste it there yourself."
+            throw "No source code in '$base'. Run 2. get-source.bat (or build.ps1 -Download stepmania|itgmania) to download it, or paste it there yourself."
         } else {
-            throw "StepMania/ITGmania source code not found in: $Source`nThe folder is not empty but has no CMakeLists.txt. Put the source there (the folder that contains CMakeLists.txt, src, Themes...) or use -Source <path>."
+            throw "StepMania/ITGmania source code not found in: $base`nPut each source in its own folder inside it (the folder that contains CMakeLists.txt, src, Themes...), or use -Source <path>."
         }
     }
 }
-$Source = $resolved
+
+# Several sources: ask which one (Enter = the last one built)
+$last = ''
+foreach ($lf in @($lastFile, (Join-Path $Work 'last-source.txt'))) {    # (the second one: older versions)
+    if (-not $last -and (Test-Path -LiteralPath $lf)) { $last = "$(Get-Content -LiteralPath $lf -ErrorAction SilentlyContinue | Select-Object -First 1)".Trim() }
+}
+$pick = $null
+if ($list.Count -eq 1) {
+    $pick = $list[0]
+} else {
+    $defIdx = -1
+    for ($i = 0; $i -lt $list.Count; $i++) { if ($list[$i].Name -ieq $last) { $defIdx = $i } }
+    $names = ($list | ForEach-Object { $_.Name }) -join ', '
+    if ($justDownloaded -and $defIdx -ge 0) {
+        $pick = $list[$defIdx]      # get-source.ps1 records the folder it just downloaded
+    } elseif ([Console]::IsInputRedirected -and $defIdx -ge 0) {
+        $pick = $list[$defIdx]      # no console (automation): use the last one built
+        Write-Host "Several sources found; building the last one built: $($pick.Name)" -ForegroundColor Yellow
+    } else {
+        Write-Host "`nSeveral sources found in ${base}:" -ForegroundColor Cyan
+        for ($i = 0; $i -lt $list.Count; $i++) {
+            $mark = if ($i -eq $defIdx) { '  <- last built' } else { '' }
+            Write-Host ('  [{0}] {1,-28} ({2}){3}' -f ($i + 1), $list[$i].Name, $list[$i].Game, $mark)
+        }
+        Write-Host '  [Q] Quit'
+        $prompt = if ($defIdx -ge 0) { "Which one do you want to build? [$($defIdx + 1)]" } else { 'Which one do you want to build?' }
+        $tries = 0
+        while (-not $pick) {
+            $ans = ''
+            try { $ans = "$(Read-Host $prompt)".Trim() } catch { }
+            if ($ans -eq '' -and $defIdx -ge 0) { $pick = $list[$defIdx] }
+            elseif ($ans -eq '' -and [Console]::IsInputRedirected) {
+                throw "Several sources found in ${base}: $names`nChoose one with -Source <name> (or SOURCE=<name> in 3. build.bat)."
+            }
+            elseif ($ans -match '^[qQ]$') { Write-Host 'Cancelled.'; exit 2 }
+            elseif ($ans -match '^\d+$' -and [int]$ans -ge 1 -and [int]$ans -le $list.Count) { $pick = $list[[int]$ans - 1] }
+            else {
+                if (++$tries -ge 5) { throw "No valid choice. Use -Source <name> (or SOURCE=<name> in 3. build.bat). Sources: $names" }
+                Write-Host '    Type one of the numbers above (or Q to quit).'
+            }
+        }
+    }
+}
+$Source  = $pick.Path
+$srcName = $pick.Name
+try { Set-Content -LiteralPath $lastFile -Value $srcName -Encoding ascii } catch { }
+Write-Host "Source: $srcName  ($Source)" -ForegroundColor Green
 
 # ---- Are the git submodules there? -----------------------------------------
 # A GitHub "Download ZIP" has no submodules (extern\mbedtls, extern\libpng...), and CMake then fails with
@@ -181,19 +276,14 @@ if ($missingSub.Count) {
                else { "This happens when the code is downloaded with GitHub's `"Download ZIP`" button: ZIP files do not include submodules." }
         throw ("The source is missing $($missingSub.Count) git submodule(s): $subList`n" + $why + "`n" +
                "Fix (pick one):`n" +
-               "  - Empty source\ and run 2. get-source.bat (StepMania, ITGmania, or paste the URL of a fork)`n" +
-               "  - Or clone it yourself:  git clone --recursive <repository URL> source`n" +
-               "  - If source\ is already a git clone, run inside it:  git submodule update --init --recursive")
+               "  - Delete this folder and download it again with 2. get-source.bat (StepMania, ITGmania, or paste the URL of a fork)`n" +
+               "  - Or clone it yourself:  git clone --recursive <repository URL> source\<name>`n" +
+               "  - If the folder is already a git clone, run inside it:  git submodule update --init --recursive")
     }
 }
 
 # ---- Which game is it? -----------------------------------------------------
-$exeName = 'StepMania'
-$coreCmake = Join-Path $Source 'StepmaniaCore.cmake'
-if (Test-Path $coreCmake) {
-    $m = Select-String -Path $coreCmake -Pattern 'set\(SM_EXE_NAME\s+"([^"]+)"' | Select-Object -First 1
-    if ($m) { $exeName = $m.Matches[0].Groups[1].Value }
-}
+$exeName = $pick.Game
 $gameId = ($exeName.ToLower() -replace '[^a-z0-9]+', '-').Trim('-')
 if (-not $gameId) { $gameId = 'stepmania' }
 Write-Host "Game detected: $exeName" -ForegroundColor Green
@@ -241,8 +331,26 @@ if ($workFull -ieq $srcFull -or $workFull.StartsWith($srcFull + '\', 'OrdinalIgn
     throw "Work ($workFull) cannot be the source folder or be inside it."
 }
 
-$stage    = Join-Path $workFull 'stepmania'
-$buildDir = Join-Path $workFull "build\$Config"
+# Each source gets its own working copy and build folder, so switching between sources does not
+# recompile everything:  _work\<name>\stage  and  _work\<name>\build\<Config>
+$srcWork  = Join-Path $workFull $srcName
+$stage    = Join-Path $srcWork 'stage'
+$buildDir = Join-Path $srcWork "build\$Config"
+
+# Older versions of the builder used _work\stepmania (copy) and _work\build\<Config> for the only source.
+# Remove them once (only cache; the next build of that source recompiles everything).
+$oldStage = Join-Path $workFull 'stepmania'
+$oldBuild = Join-Path $workFull 'build'
+$hasOldStage = Test-Path -LiteralPath (Join-Path $oldStage 'CMakeLists.txt')
+$hasOldBuild = [bool](Get-ChildItem -LiteralPath $oldBuild -Directory -ErrorAction SilentlyContinue |
+                      Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'CMakeCache.txt') })
+if ($hasOldStage -or $hasOldBuild) {
+    Write-Host 'Removing the working folders of the previous builder version (one time only; this build recompiles everything)...' -ForegroundColor Yellow
+    foreach ($old in @($(if ($hasOldStage) { $oldStage }), $(if ($hasOldBuild) { $oldBuild })) | Where-Object { $_ }) {
+        cmd /c "rmdir /s /q `"$old`""
+        if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Recurse -Force }
+    }
+}
 New-Item -ItemType Directory -Force $stage | Out-Null
 
 # ---- 1. Sync source -------------------------------------------------------
@@ -405,7 +513,8 @@ if (-not $NoPackage) {
     # Data folders shipped in a clean build (same layout for StepMania and ITGmania)
     $dataDirs  = 'Announcers', 'BackgroundEffects', 'BackgroundTransitions', 'BGAnimations', 'Characters',
                  'Courses', 'Data', 'Docs', 'NoteSkins', 'Scripts', 'Songs', 'Themes'
-    $folder    = if ($Name) { "$gameId-$Name" } else { "$gameId-" + (Get-Date -Format 'MMddyyyy') }
+    # Named after the source folder: stepmania-MMddyyyy, itgmania-MMddyyyy, my-fork-MMddyyyy...
+    $folder    = if ($Name) { "$srcName-$Name" } else { "$srcName-" + (Get-Date -Format 'MMddyyyy') }
     $outDir    = Join-Path $Root $folder
     Step "Packaging clean build: $outDir"
     New-Item -ItemType Directory -Force $outDir | Out-Null
@@ -458,4 +567,50 @@ Write-Host "Your source was NOT modified: $srcFull"
 if ($Run) {
     Step "Launching $(Split-Path $finalExe -Leaf)"
     Start-Process -FilePath $finalExe -WorkingDirectory $finalDir
+}
+
+# ---- 6. Delete the working folder? ------------------------------------------
+if ($offerDelete) {
+    Step 'Working folder (_work)'
+    $workMb = [math]::Round((Get-ChildItem -LiteralPath $srcWork -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1MB)
+    $doDelete = $DeleteWork -eq 'yes'
+    if ($DeleteWork -eq 'ask') {
+        Write-Host "    The clean build is ready. _work\$srcName holds the internal copy of the source and the"
+        Write-Host "    build cache ($workMb MB). The game does not need it."
+        Write-Host ''
+        Write-Host '    [Y] Delete it: tidier, but the NEXT build will be slower (it compiles everything again,' -ForegroundColor Yellow
+        Write-Host '        a few minutes).' -ForegroundColor Yellow
+        Write-Host '    [N] Keep it: the next build only recompiles what you changed (much faster).   (default)' -ForegroundColor Green
+        Write-Host ''
+        $ans = ''
+        try { $ans = "$(Read-Host '    Delete _work? [y/N]')".Trim() } catch { }
+        $doDelete = $ans -match '^(y|yes|s|si)$'
+    }
+    if (-not $doDelete) {
+        Ok "Kept ($workMb MB). The next build of '$srcName' will be incremental."
+    }
+}
+if ($offerDelete -and $doDelete) {
+    Write-Host '    Deleting...'
+    # The compiler's PDB server can stay alive for a few seconds holding files in the build folder
+    # (only the copies started from our portable toolchain; an installed Visual Studio is left alone)
+    $tcFull = [IO.Path]::GetFullPath($tc) + '\'
+    Get-Process mspdbsrv, vctip -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.StartsWith($tcFull, 'OrdinalIgnoreCase') } |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $workFull 'last-source.txt') -Force -ErrorAction SilentlyContinue   # left by an older version
+    $null = Invoke-WithSpinner -FilePath 'cmd.exe' -Arguments ('/c rmdir /s /q "{0}"' -f $srcWork) -Label 'Deleting _work'
+    if (Test-Path -LiteralPath $srcWork) {
+        Start-Sleep -Seconds 2
+        cmd /c "rmdir /s /q `"$srcWork`""
+    }
+    if (Test-Path -LiteralPath $srcWork) {
+        Warn "Could not delete $srcWork completely (a file is in use). It is safe to delete it by hand."
+    } else {
+        # remove _work itself when nothing else is left in it
+        if (-not (Get-ChildItem -LiteralPath $workFull -Force -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+            Remove-Item -LiteralPath $workFull -Force -ErrorAction SilentlyContinue
+        }
+        Ok 'Working folder deleted (the next build will compile everything again)'
+    }
 }

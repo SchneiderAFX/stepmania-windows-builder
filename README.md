@@ -6,7 +6,7 @@ A small Windows toolkit to build [StepMania](https://github.com/stepmania/stepma
 - Your source code is **never modified**.
 - Uses a **portable toolchain** (MSVC v143 + Windows SDK + CMake + Ninja) downloaded into this folder. Nothing is installed on your system.
 - Every download is **verified** (SHA-256 + Microsoft Authenticode signatures).
-- Builds are **incremental**: after the first build, only what you changed is recompiled.
+- **You choose how tidy it is**: at the end of every build you are asked whether to delete the internal working folder (`_work`). Keep it and the next build is **incremental** (only what you changed is recompiled, ideal while testing code changes); delete it and the folder stays clean, but the next build compiles everything again. `DELETE_WORK=yes` / `no` in `3. build.bat` answers it for you.
 - **You always see that it is working**: numbered steps (`[3/5]`), percentage bars for downloads, compilation and packaging, and an "in progress" spinner with the elapsed time for tasks whose length cannot be known.
 - The game (StepMania or ITGmania) is **detected automatically** from the source.
 
@@ -23,7 +23,7 @@ The three numbered `.bat` files in the main folder are the recommended order. Do
 | Step | File | When |
 |---|---|---|
 | 1 | `1. setup-toolchain.bat` | **Once**, to get the portable toolchain |
-| 2 | `2. get-source.bat` | **Only if you do not have StepMania or ITGmania in `source\` yet** (it downloads it for you). If you already pasted the source there, skip this step |
+| 2 | `2. get-source.bat` | **Only if you do not have StepMania or ITGmania in `source\` yet**, or to add another one (it downloads it for you into its own folder). If you already pasted the source there, skip this step |
 | 3 | `3. build.bat` | Every time you want to build |
 
 (`verify-toolchain.bat` has no number: it is an optional check that you can run whenever you want.)
@@ -32,16 +32,18 @@ The three numbered `.bat` files in the main folder are the recommended order. Do
    When it reaches the Microsoft Defender scan (it can take several minutes) it asks you to **continue** or **skip** it. Skipping is less secure: the files are still checked by hash and Microsoft signature, but not scanned for malware. To stop being asked, set `DEFENDER=scan` or `DEFENDER=skip` inside the `.bat`.
 
 2. **Get the source code** in `.\source`. **This step is only needed if you do not already have StepMania (or ITGmania) in `source\`.** Pick one:
-   - **Let the builder download it**: double-click `2. get-source.bat` and choose StepMania, ITGmania, or **another repository such as a fork** (paste its URL). (If you skip it and `source\` is empty, step 3 offers the same menu, so you cannot get stuck.)
-   - **Do it yourself**: paste the source there and skip this step. The folder that contains `CMakeLists.txt`, `src`, `Themes`... can be directly in `source\` or inside one subfolder (e.g. `source\stepmania\`). A `.git` folder is optional.
+   - **Let the builder download it**: double-click `2. get-source.bat` and choose StepMania, ITGmania, or **another repository such as a fork** (paste its URL). It goes into its own folder: `source\stepmania`, `source\itgmania` or `source\<fork name>`. (If you skip it and `source\` is empty, step 3 offers the same menu, so you cannot get stuck.)
+   - **Do it yourself**: paste the source into its own folder inside `source\` (e.g. `source\stepmania\`, the folder that contains `CMakeLists.txt`, `src`, `Themes`...) and skip this step. A single source pasted directly in `source\` also works. A `.git` folder is optional.
+
+   **Several sources side by side**: you can keep as many as you want (e.g. `source\stepmania`, `source\itgmania`, `source\stepmania-fixes`). When there is more than one, `3. build.bat` asks which one to build (Enter = the last one you built), or set `SOURCE=<folder name>` in it. If you download a source whose folder already exists, `2. get-source.bat` warns you and lets you **keep it and download the new one with another name** (e.g. `stepmania-2`) or **delete it and download it again** (you must type `YES`; your changes in it would be lost).
 
    > **Do not use GitHub's "Download ZIP" button.** ZIP files do not include the git submodules (`extern\mbedtls`, `extern\libpng`...), so the build cannot work. Use `2. get-source.bat` (it also downloads forks) or `git clone --recursive <URL>`. The builder detects a source without submodules and tells you how to fix it.
 
 3. **Build**: double-click `3. build.bat`.
 
-4. **Play**: the result is in `.\stepmania-MMDDYYYY\` or `.\itgmania-MMDDYYYY\` (US date, e.g. `itgmania-11082026`). Run `Program\StepMania.exe` or `Program\ITGmania.exe`.
+4. **Play**: the result is in a folder named after the source and the date (US format): `.\stepmania-MMDDYYYY\`, `.\itgmania-MMDDYYYY\`, `.\stepmania-fixes-MMDDYYYY\`... (e.g. `itgmania-11082026`). Run `Program\StepMania.exe` or `Program\ITGmania.exe`.
 
-To change the game's code: edit the files in `.\source` and run the build again.
+To change the game's code: edit the files in its folder inside `.\source` and run the build again.
 
 ### About the download
 
@@ -51,7 +53,9 @@ You do **not** need git: it uses the one it finds (PATH, Program Files, GitHub D
 
 **Forks and other repositories**: choose `[3] Other repository` in the menu and paste its HTTPS address (e.g. `https://github.com/SomeUser/stepmania-fork`), or set `REPO_URL` in `2. get-source.bat`, or run `"2. get-source.bat" -Url <URL>`. It must be a public repository; it is cloned the same way, with submodules. That code is your choice to trust: the builder verifies the toolchain, not the source.
 
-To switch to the other game, rename or empty `source\` and download again (or build from another folder with `-Source <path>`).
+To add the other game, just download it too: each source has its own folder and its own output folder (and, while you keep `_work`, its own build cache in `_work\<name>\`, so switching between them does not recompile everything).
+
+If an older version of the builder left a source pasted directly in `source\`, `2. get-source.bat` offers to **move** it into its own folder (e.g. `source\stepmania\`) before downloading another one. Nothing inside it is changed.
 
 ## What you will see while it works
 
@@ -83,8 +87,8 @@ set "RUN=0"
 
 | File | Settings |
 |---|---|
-| `3. build.bat` | `CONFIG`, `NAME`, `SOURCE`, `DOWNLOAD`, `RUN`, `CLEAN`, `SYNC_ONLY`, `NO_PACKAGE`, `NO_PORTABLE`, `SKIP_VERIFY`, `PAUSE_AT_END` |
-| `2. get-source.bat` | `GAME`, `REPO_URL`, `TARGET`, `FULL_HISTORY`, `USE_MINGIT`, `PAUSE_AT_END` |
+| `3. build.bat` | `CONFIG`, `NAME`, `SOURCE`, `DOWNLOAD`, `RUN`, `CLEAN`, `SYNC_ONLY`, `NO_PACKAGE`, `NO_PORTABLE`, `SKIP_VERIFY`, `DELETE_WORK` (`ask`/`yes`/`no`), `PAUSE_AT_END` |
+| `2. get-source.bat` | `GAME`, `REPO_URL`, `FOLDER_NAME`, `TARGET`, `FULL_HISTORY`, `USE_MINGIT`, `PAUSE_AT_END` |
 | `1. setup-toolchain.bat` | `DEFENDER` (`ask`/`scan`/`skip`), `FORCE`, `SDK_VERSION`, `MSVC_MINOR`, `TOOLCHAIN_DIR`, `PAUSE_AT_END` |
 | `verify-toolchain.bat` | `DEFENDER` (`ask`/`scan`/`skip`), `TOOLCHAIN_DIR`, `PAUSE_AT_END` |
 
@@ -93,21 +97,27 @@ set "RUN=0"
 - Anything typed on the command line (e.g. `"3. build.bat" -Config Debug -Run`) is added at the end and **replaces** the matching setting for that run.
 - `PAUSE_AT_END=0` closes the window when finished (useful for automation); the exit code of the script is preserved.
 - `DOWNLOAD=itgmania` (or `stepmania`) in `3. build.bat` downloads that game without showing the menu when `source\` is empty.
+- `SOURCE=itgmania` in `3. build.bat` always builds `source\itgmania` without asking (any folder name inside `source\`, or a full path).
+- `FOLDER_NAME=sm-test` in `2. get-source.bat` downloads into `source\sm-test` instead of the repository name.
 
 ## Folder layout
 
 ```
 builder-folder\
-  source\                 <- the StepMania/ITGmania source (never modified by the builder)
+  source\                 <- your sources, one folder each (never modified by the builder)
+    stepmania\            <-   e.g. StepMania
+    itgmania\             <-   e.g. ITGmania
+    stepmania-fixes\      <-   e.g. a fork
   toolchain\              <- portable MSVC + SDK + CMake + Ninja (created by setup-toolchain)
   tools\git\              <- portable git, only if you had none (created by get-source)
-  _work\                  <- internal: working copy + build objects (safe to delete, see below)
-  stepmania-MMDDYYYY\     <- the clean build (output); itgmania-MMDDYYYY\ for ITGmania
+  _work\                  <- internal: working copy + build cache (you are asked after each build whether to delete it)
+  stepmania-MMDDYYYY\     <- the clean builds (output): <source name>-MMDDYYYY
   1. setup-toolchain.bat  <- step 1: downloads and verifies the toolchain (once)
-  2. get-source.bat       <- step 2: downloads StepMania or ITGmania into source\ (only if source\ is empty)
+  2. get-source.bat       <- step 2: downloads StepMania, ITGmania or a fork into source\<name> (only if you need one)
   3. build.bat            <- step 3: builds the game
   verify-toolchain.bat    <- optional: checks the toolchain was not tampered with
   scripts\                <- the PowerShell scripts the .bat files run; do not delete
+                             (.last-source in it remembers the last source you built)
     build.ps1  get-source.ps1  setup-toolchain.ps1  verify-toolchain.ps1
     progress.ps1          <- shared helpers (progress bars, spinner)
 ```
@@ -135,19 +145,20 @@ These options go after the `.bat` name (`"3. build.bat" -Run`) or after `.\scrip
 | Option | Description |
 |---|---|
 | `-Config Release\|Debug\|RelWithDebInfo\|MinSizeRel` | Build configuration (default `Release`) |
-| `-Name finished` | Output folder name: `stepmania-finished` / `itgmania-finished` instead of the date |
-| `-Download stepmania\|itgmania` | If `source\` is empty, download that game there without asking |
+| `-Name finished` | Output folder name: `<source name>-finished` (e.g. `stepmania-finished`) instead of the date |
+| `-Download stepmania\|itgmania` | If there is no source at all, download that game without asking |
 | `-Run` | Launch the game when done |
 | `-Clean` | Rebuild from scratch (needed once after moving or renaming this folder) |
 | `-SyncOnly` | Only refresh the internal working copy |
 | `-NoPackage` | Build, but do not create the clean folder |
-| `-Source <path>` | Use another source folder (default `.\source`) |
+| `-Source <name or path>` | Which source to build: a folder name inside `source\` (e.g. `-Source itgmania`) or a full path. Default: the only one, or a menu when there are several |
 | `-NoPortable` | Ignore `.\toolchain` and use an installed Visual Studio 2022 |
 | `-SkipVerify` | Skip the quick integrity check of the toolchain before building |
+| `-DeleteWork ask\|yes\|no` | After a successful build: ask whether to delete `_work` (default; Enter = keep), delete it (`yes`: the next build compiles everything again), or keep it (`no`: the next build only recompiles what changed). `-KeepWork` = `no`. `_work` is always kept with `-SyncOnly` / `-NoPackage` and when the build fails |
 
 ### `get-source`
 
-`-Game stepmania|itgmania`, `-Url <https URL>` (another repository, e.g. a fork; not together with `-Game`), `-Target <folder>`, `-FullHistory` (download the whole git history), `-UseMinGit` (ignore installed git).
+`-Game stepmania|itgmania`, `-Url <https URL>` (another repository, e.g. a fork; not together with `-Game`), `-FolderName <name>` (folder inside `source\`; default: the repository name), `-Target <folder>` (exact empty folder instead), `-FullHistory` (download the whole git history), `-UseMinGit` (ignore installed git).
 
 ### `setup-toolchain` and `verify-toolchain`
 
@@ -156,9 +167,9 @@ These options go after the `.bat` name (`"3. build.bat" -Run`) or after `.\scrip
 
 ## How it works
 
-The games' CMake writes the executable into `<source>\Program`, so building in place would modify your source. The builder mirrors `source\` (without `.git`) into `_work\stepmania`, builds there with Ninja, and then copies only the files a release build needs into the output folder.
+The games' CMake writes the executable into `<source>\Program`, so building in place would modify your source. The builder mirrors the chosen source (without `.git`) into `_work\<name>\stage`, builds there with Ninja into `_work\<name>\build\<Config>`, and then copies only the files a release build needs into the output folder. Finally it asks whether to delete `_work\<name>\` (and `_work\` when it is empty). If you keep it, each source keeps its own `_work\<name>\` and its next build is incremental. (Older versions used `_work\stepmania` and `_work\build`; they are removed automatically once, and that first build recompiles everything.)
 
-If `source\` is a git repository and git is available, the build is stamped with the real commit (e.g. `ITGmania1.3.0-BETA-git-8a3bf88`) by giving the working copy a small `.git` pointer file to your repository (read-only use; nothing is copied).
+If the source is a git repository and git is available, the build is stamped with the real commit (e.g. `ITGmania1.3.0-BETA-git-8a3bf88`) by giving the working copy a small `.git` pointer file to your repository (read-only use; nothing is copied).
 
 ## Security
 
@@ -171,7 +182,7 @@ If `source\` is a git repository and git is available, the build is stamped with
 
 `build.ps1` re-checks the key tools (`cl`, `link`, `rc`, `mt`, `cmake`, `ninja`) against the inventory before every build, and `verify-toolchain.bat` checks the whole folder again (hashes, signatures and, unless skipped, a Defender scan).
 
-`get-source.ps1` only clones the two hard-coded official repositories (and the submodules those repositories declare, all on GitHub or similar public hosts). If it needs a portable git, it downloads MinGit from the official `git-for-windows/git` GitHub release and refuses to use it unless the SHA-256 published for that release matches.
+`get-source.ps1` clones the two official repositories, or a repository whose HTTPS address you type yourself (e.g. a fork), plus the submodules that repository declares. A repository you choose is code you decided to trust: the builder does not audit it. If it needs a portable git, it downloads MinGit from the official `git-for-windows/git` GitHub release and refuses to use it unless the SHA-256 published for that release matches.
 
 Notes:
 - The Windows SDK "Store Apps Tools" package is not installed in full (it contains unsigned MSIX/Store tools); only `rc.exe`, `rcdll.dll`, `mt.exe` and its dependency are kept.
@@ -182,15 +193,15 @@ Notes:
 
 | Item | Safe to delete? |
 |---|---|
-| `source\` | **No**: it is your code (if you only downloaded it, you can download it again) |
+| `source\` and the folders inside it | **No**: it is your code (if you only downloaded one, you can download it again). Deleting one source folder is fine if you no longer need it; also delete its `_work\<name>\` to free space |
 | The four `.bat` files and the `scripts\` folder | **No** |
 | `toolchain\` (`msvc`, `sdk`, `cmake`, `ninja`) | Not if you want to keep building (`1. setup-toolchain.bat` can recreate it) |
 | `toolchain\inventory.json` | Not if you use the portable toolchain (`build.ps1` refuses to build without it, unless you pass `-SkipVerify`) |
 | `tools\git\` | Yes. It is downloaded again if you need it |
-| `_work\` | Yes. It is regenerated; the next build is just slower |
+| `_work\` | Yes (the builder offers to delete it after each build). It is regenerated; the next build is just slower because it compiles everything |
 | `toolchain\_downloads\` | Yes. Only a download cache |
 | `*.log` | Yes |
-| `stepmania-MMDDYYYY\`, `itgmania-MMDDYYYY\` | Yes, but copy its `Save\` first if you played in it (preferences, profiles, scores) |
+| `<source name>-MMDDYYYY\` (e.g. `stepmania-11142026\`) | Yes, but copy its `Save\` first if you played in it (preferences, profiles, scores) |
 
 ## Moving or renaming this folder
 
@@ -198,16 +209,18 @@ All paths are relative to the scripts, so you can rename or move the folder (eve
 
 ## Troubleshooting
 
-- **"No source code in ... source"**: run `2. get-source.bat`, or paste the source into `.\source` (it must contain `CMakeLists.txt` and `src\`).
+- **"No source code in ... source"**: run `2. get-source.bat`, or paste the source into its own folder inside `.\source` (that folder must contain `CMakeLists.txt` and `src\`).
+- **"Several sources found ... Choose one with -Source <name>"**: this appears only when there is no console to show the menu. Set `SOURCE=<folder name>` in `3. build.bat`.
+- **"A source named '...' already exists"** (get-source): choose `[1]` to keep it and download the new one with another name, or `[2]` to delete it and download it again.
 - **"The source is missing N git submodule(s)"** (or CMake errors such as `extern/mbedtls does not contain a CMakeLists.txt` / `pnglibconf.h.prebuilt does not exist`): the source was downloaded with GitHub's "Download ZIP", which leaves `extern\...` empty. Fix it in one of these ways:
-  - empty `source\` and run `2. get-source.bat` (choose `[3]` and paste the URL for a fork);
-  - or clone it yourself: `git clone --recursive <URL> source`;
-  - if `source\` is already a git clone, `3. build.bat` offers to download the missing submodules for you (or run `git submodule update --init --recursive` inside it).
-- **"Target folder is not empty"** (get-source): `source\` already has files. Rename or empty it first; nothing is overwritten.
+  - delete that source folder and run `2. get-source.bat` (choose `[3]` and paste the URL for a fork);
+  - or clone it yourself: `git clone --recursive <URL> source\<name>`;
+  - if the folder is already a git clone, `3. build.bat` offers to download the missing submodules for you (or run `git submodule update --init --recursive` inside it).
+- **"Target folder is not empty"** (get-source with `-Target`): that exact folder already has files. Rename or empty it first; nothing is overwritten.
 - **Download fails**: check your internet connection and run it again. Nothing half-downloaded is left behind.
 - **Build fails with an Integrity error**: a toolchain file changed. Run `verify-toolchain.bat`; if you do not recognise the change, reinstall with `"1. setup-toolchain.bat" -Force`.
 - **Sound feels delayed (StepMania)**: StepMania's default Windows driver list is `WaveOut,DirectSound-sw,WDMKS,Null` (ITGmania's is `DirectSound-sw,WASAPI,WaveOut,WDMKS,Null`). In `Save\Preferences.ini` try `SoundDrivers=DirectSound-sw` or `SoundDrivers=WDMKS` (game closed).
-- **StepMania shows "String 'SortOrder::Meter' is missing" (also TopP1Grades, TopP2Grades) in the music wheel**: this is an upstream bug of the StepMania source (the engine added those sort orders without adding their texts). It is not caused by the builder. Add these three lines at the end of the `[SortOrder]` section of `source\Themes\_fallback\Languages\en.ini` (and your language's file) and build again:
+- **StepMania shows "String 'SortOrder::Meter' is missing" (also TopP1Grades, TopP2Grades) in the music wheel**: this is an upstream bug of the StepMania source (the engine added those sort orders without adding their texts). It is not caused by the builder. Add these three lines at the end of the `[SortOrder]` section of `source\<name>\Themes\_fallback\Languages\en.ini` (and your language's file) and build again:
 
   ```ini
   TopP1Grades=P1 Top Grades

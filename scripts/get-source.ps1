@@ -18,14 +18,19 @@
   By default it makes a shallow clone (latest commit only): much smaller and faster, and it is
   all that is needed to build. Use -FullHistory to download the whole git history.
 
-  The target folder must be empty (or not exist). Nothing is ever overwritten.
+  Each download goes into its own folder inside .\source, named after the repository
+  (source\stepmania, source\itgmania, source\<fork name>), so several sources can live side by side.
+  If that folder already exists you can keep it and download the new one with another name, or
+  delete it and download it again. A source pasted directly in .\source (older layout) is first
+  moved into its own folder, with your confirmation.
 
 .EXAMPLE
   .\scripts\get-source.ps1                       # asks which game
-  .\scripts\get-source.ps1 -Game itgmania
+  .\scripts\get-source.ps1 -Game itgmania        # -> source\itgmania
   .\scripts\get-source.ps1 -Game stepmania -FullHistory
-  .\scripts\get-source.ps1 -Game itgmania -Target D:\src\itg
-  .\scripts\get-source.ps1 -Url https://github.com/SomeUser/stepmania-fork
+  .\scripts\get-source.ps1 -Game stepmania -FolderName sm-test    # -> source\sm-test
+  .\scripts\get-source.ps1 -Url https://github.com/SomeUser/stepmania-fork   # -> source\stepmania-fork
+  .\scripts\get-source.ps1 -Game itgmania -Target D:\src\itg      # exact folder (must be empty)
 #>
 [CmdletBinding()]
 param(
@@ -35,7 +40,13 @@ param(
     # Clone another repository instead (e.g. a fork). HTTPS only. Cannot be used together with -Game.
     [string]$Url = '',
 
-    # Folder to clone into. Empty = .\source
+    # Name of the folder inside source\. Empty = the repository name (stepmania, itgmania, the fork's name)
+    [string]$FolderName = '',
+
+    # Folder that holds the sources. Empty = .\source
+    [string]$SourceRoot = '',
+
+    # Exact folder to clone into instead (must be empty). Overrides -SourceRoot / -FolderName.
     [string]$Target = '',
 
     [switch]$FullHistory,   # download the whole git history (slower, larger)
@@ -48,13 +59,14 @@ $ProgressPreference    = 'SilentlyContinue'
 
 $scriptsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root       = Split-Path -Parent $scriptsDir          # builder folder (this script lives in <builder>\scripts)
-if (-not $Target) { $Target = Join-Path $root 'source' }
+$explicitTarget = [bool]$Target
+if (-not $SourceRoot) { $SourceRoot = Join-Path $root 'source' }
 
 . (Join-Path $scriptsDir 'progress.ps1')
 
 $games = [ordered]@{
-    stepmania = @{ Name = 'StepMania'; Url = 'https://github.com/stepmania/stepmania.git'; Size = 'about 600 MB' }
-    itgmania  = @{ Name = 'ITGmania';  Url = 'https://github.com/itgmania/itgmania.git';   Size = 'about 600 MB' }
+    stepmania = @{ Name = 'StepMania'; Folder = 'stepmania'; Url = 'https://github.com/stepmania/stepmania.git'; Size = 'about 600 MB' }
+    itgmania  = @{ Name = 'ITGmania';  Folder = 'itgmania';  Url = 'https://github.com/itgmania/itgmania.git';   Size = 'about 600 MB' }
 }
 
 # ---------------------------------------------------------------- git discovery
@@ -111,7 +123,7 @@ function New-CustomRepo {
         throw "Invalid repository URL: '$RepoUrl'`nUse the HTTPS address of the repository, e.g. https://github.com/SomeUser/stepmania-fork"
     }
     $name = ($u -split '/')[-1] -replace '\.git$', ''
-    return @{ Name = $name; Url = $u; Size = 'size unknown' }
+    return @{ Name = $name; Folder = $name; Url = $u; Size = 'size unknown' }
 }
 
 # ---------------------------------------------------------------- choose what to download
@@ -140,6 +152,80 @@ if (-not $Url -and -not $Game) {
 $g = if ($Url) { New-CustomRepo $Url } else { $games[$Game] }
 
 # ---------------------------------------------------------------- target folder
+function Remove-Folder([string]$Path) {
+    # rmdir copes with very long paths and the read-only files inside .git
+    cmd /c "rmdir /s /q `"$Path`""
+    if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue }
+    if (Test-Path -LiteralPath $Path) { throw "Could not delete $Path completely (is a file in it open in another program?)." }
+}
+function Get-FreeName([string]$Dir, [string]$Base) {
+    $n = 2
+    while (Test-Path -LiteralPath (Join-Path $Dir "$Base-$n")) { $n++ }
+    return "$Base-$n"
+}
+function Read-Answer([string]$Prompt) {
+    $a = ''
+    try { $a = "$(Read-Host $Prompt)".Trim() } catch { }
+    return $a
+}
+
+if (-not $explicitTarget) {
+    $SourceRoot = [IO.Path]::GetFullPath($SourceRoot).TrimEnd('\')
+    $folder = if ($FolderName) { $FolderName.Trim() } else { $g.Folder }
+    if ($folder -notmatch '^[A-Za-z0-9][A-Za-z0-9._ \-]*$' -or $folder -match '\.\.') {
+        throw "Invalid folder name: '$folder' (use letters, numbers, '.', '-', '_' or spaces)."
+    }
+    New-Item -ItemType Directory -Force $SourceRoot | Out-Null
+
+    # Older layout: one source pasted directly in source\. To keep several side by side, it has to live in
+    # its own folder: MOVE it (same drive = instant, nothing is changed inside it), with the user's OK.
+    if (Test-Path -LiteralPath (Join-Path $SourceRoot 'CMakeLists.txt')) {
+        $oldGame = 'stepmania'
+        $core = Join-Path $SourceRoot 'StepmaniaCore.cmake'
+        if (Test-Path -LiteralPath $core) {
+            $m = Select-String -LiteralPath $core -Pattern 'set\(SM_EXE_NAME\s+"([^"]+)"' | Select-Object -First 1
+            if ($m) { $oldGame = ($m.Matches[0].Groups[1].Value.ToLower() -replace '[^a-z0-9]+', '-').Trim('-') }
+        }
+        $oldFolder = $oldGame
+        if (Test-Path -LiteralPath (Join-Path $SourceRoot $oldFolder)) { $oldFolder = Get-FreeName $SourceRoot $oldGame }
+        Write-Host ''
+        Write-Host "source\ already holds a source directly in it: $SourceRoot" -ForegroundColor Yellow
+        Write-Host '    To keep several sources side by side, each one needs its own folder.'
+        Write-Host "    The existing one will be MOVED (not changed) to: source\$oldFolder"
+        if ((Read-Answer '    Move it now? [Y/N]') -notmatch '^(y|yes|s|si)$') {
+            Write-Host "Cancelled. Nothing was changed. (Or move it yourself into a folder such as source\$oldFolder.)"
+            exit 2
+        }
+        $dest = Join-Path $SourceRoot $oldFolder
+        New-Item -ItemType Directory -Force $dest | Out-Null
+        Get-ChildItem -LiteralPath $SourceRoot -Force |
+            Where-Object { $_.Name -ne $oldFolder -and $_.Name -notmatch '^(\.gitkeep|\.keep|put-[a-z0-9\-]+-here\.txt)$' } |
+            ForEach-Object { Move-Item -LiteralPath $_.FullName -Destination $dest }
+        Ok "Moved to source\$oldFolder"
+    }
+
+    # A source with that name already exists: keep it (download with another name) or replace it
+    $Target = Join-Path $SourceRoot $folder
+    if (-not (Test-DirIsEmpty $Target)) {
+        $free = Get-FreeName $SourceRoot $folder
+        Write-Host ''
+        Write-Host "A source named '$folder' already exists: $Target" -ForegroundColor Yellow
+        Write-Host "  [1] Keep it, and download the new one as source\$free   (recommended)"
+        Write-Host "  [2] DELETE it and download it again   (any change you made in it will be LOST)" -ForegroundColor Yellow
+        Write-Host '  [Q] Cancel'
+        switch -Regex (Read-Answer 'Choice [1]') {
+            '^1?$' { $folder = $free; $Target = Join-Path $SourceRoot $folder }
+            '^2$'  {
+                if ((Read-Answer "    Delete source\$folder for good? Type YES to confirm") -ne 'yes') { Write-Host 'Cancelled. Nothing was deleted.'; exit 2 }
+                Write-Host "    Deleting source\$folder..."
+                Remove-Folder $Target
+                Ok 'Deleted'
+            }
+            default { Write-Host 'Cancelled.'; exit 2 }
+        }
+    }
+}
+
 $Target = [IO.Path]::GetFullPath($Target).TrimEnd('\')
 $existed = Test-Path $Target
 if (-not (Test-DirIsEmpty $Target)) {
@@ -204,5 +290,9 @@ if ($missingSub.Count) {
 }
 if (-not (Test-Path (Join-Path $Target 'CMakeLists.txt'))) {
     Warn 'This repository has no CMakeLists.txt in its root: it does not look like StepMania/ITGmania source code.'
+}
+if (-not $explicitTarget) {
+    # 3. build.bat offers this source first (Enter) when there are several
+    try { Set-Content -LiteralPath (Join-Path $scriptsDir '.last-source') -Value (Split-Path $Target -Leaf) -Encoding ascii } catch { }
 }
 Write-Host ("`n{0} source ready in {1}  (commit {2}, {3} MB, {4:N0} s)" -f $g.Name, $Target, $hash, $mb, $sw.Elapsed.TotalSeconds) -ForegroundColor Green
