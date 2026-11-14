@@ -146,6 +146,47 @@ if (-not $resolved) {
 }
 $Source = $resolved
 
+# ---- Are the git submodules there? -----------------------------------------
+# A GitHub "Download ZIP" has no submodules (extern\mbedtls, extern\libpng...), and CMake then fails with
+# confusing errors. Detect it here, before anything is copied.
+$missingSub = @(Get-MissingSubmodules $Source)
+if ($missingSub.Count) {
+    $subList = $missingSub -join ', '
+    $gitForSub = Find-Git
+    $isClone   = Test-Path (Join-Path $Source '.git')
+    $fixed = $false
+    if ($isClone -and $gitForSub) {
+        # (with no console to answer, Read-Host returns nothing = "no")
+        Write-Host "`nThe source is missing $($missingSub.Count) git submodule(s): $subList" -ForegroundColor Yellow
+        Write-Host '    The source is a git clone whose submodules were never downloaded.'
+        Write-Host '    They can be downloaded now (this ADDS files to your source folder; nothing is overwritten).'
+        $ans = $null
+        try { $ans = Read-Host '    Download the missing submodules now? [Y/N]' } catch { }
+        if ("$ans".Trim() -match '^(y|yes|s|si)$') {
+            Write-Host '    Downloading submodules (git shows its own progress below)...'
+            $prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+            & $gitForSub -C $Source -c core.longpaths=true submodule update --init --recursive --depth 1 --progress
+            $subCode = $LASTEXITCODE
+            $ErrorActionPreference = $prevEap
+            $global:LASTEXITCODE = 0
+            if ($subCode -ne 0) { throw "git submodule update failed (code $subCode). Check your internet connection and try again." }
+            $missingSub = @(Get-MissingSubmodules $Source)
+            if ($missingSub.Count) { throw "Still missing after the download: $($missingSub -join ', ')" }
+            Ok 'Submodules downloaded'
+            $fixed = $true
+        }
+    }
+    if (-not $fixed) {
+        $why = if ($isClone) { "The source is a git clone, but its submodules were never downloaded (clone made without --recursive)." }
+               else { "This happens when the code is downloaded with GitHub's `"Download ZIP`" button: ZIP files do not include submodules." }
+        throw ("The source is missing $($missingSub.Count) git submodule(s): $subList`n" + $why + "`n" +
+               "Fix (pick one):`n" +
+               "  - Empty source\ and run 2. get-source.bat (StepMania, ITGmania, or paste the URL of a fork)`n" +
+               "  - Or clone it yourself:  git clone --recursive <repository URL> source`n" +
+               "  - If source\ is already a git clone, run inside it:  git submodule update --init --recursive")
+    }
+}
+
 # ---- Which game is it? -----------------------------------------------------
 $exeName = 'StepMania'
 $coreCmake = Join-Path $Source 'StepmaniaCore.cmake'

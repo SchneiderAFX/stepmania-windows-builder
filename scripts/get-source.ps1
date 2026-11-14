@@ -3,9 +3,11 @@
   Downloads the StepMania or ITGmania source code (with all submodules) into .\source
 
 .DESCRIPTION
-  Sources (HTTPS only, hard-coded on purpose):
+  Sources (HTTPS only):
     - StepMania : https://github.com/stepmania/stepmania.git
     - ITGmania  : https://github.com/itgmania/itgmania.git
+    - any other repository you choose (e.g. a fork) with -Url, or option [3] of the menu.
+      That is code you decided to trust: the builder verifies the toolchain, not the source.
 
   Needs git. It uses, in this order:
     1. git from PATH, Program Files or GitHub Desktop
@@ -23,11 +25,15 @@
   .\scripts\get-source.ps1 -Game itgmania
   .\scripts\get-source.ps1 -Game stepmania -FullHistory
   .\scripts\get-source.ps1 -Game itgmania -Target D:\src\itg
+  .\scripts\get-source.ps1 -Url https://github.com/SomeUser/stepmania-fork
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('', 'stepmania', 'itgmania')]
     [string]$Game = '',
+
+    # Clone another repository instead (e.g. a fork). HTTPS only. Cannot be used together with -Game.
+    [string]$Url = '',
 
     # Folder to clone into. Empty = .\source
     [string]$Target = '',
@@ -97,18 +103,41 @@ function Install-MinGit {
     return $git
 }
 
-# ---------------------------------------------------------------- choose the game
-if (-not $Game) {
-    if ([Console]::IsInputRedirected) { throw "No -Game given and no console to ask. Use: get-source.ps1 -Game stepmania|itgmania" }
+function New-CustomRepo {
+    # Validates a repository URL typed by the user and describes it like the entries of $games.
+    param([string]$RepoUrl)
+    $u = $RepoUrl.Trim().Trim('"').Trim("'").TrimEnd('/')
+    if ($u -notmatch '^https://[A-Za-z0-9.\-]+(:\d+)?/[A-Za-z0-9._~%/\-]+$') {
+        throw "Invalid repository URL: '$RepoUrl'`nUse the HTTPS address of the repository, e.g. https://github.com/SomeUser/stepmania-fork"
+    }
+    $name = ($u -split '/')[-1] -replace '\.git$', ''
+    return @{ Name = $name; Url = $u; Size = 'size unknown' }
+}
+
+# ---------------------------------------------------------------- choose what to download
+if ($Url -and $Game) { throw 'Use either -Game or -Url, not both.' }
+if (-not $Url -and -not $Game) {
+    if ([Console]::IsInputRedirected) { throw "No -Game given and no console to ask. Use: get-source.ps1 -Game stepmania|itgmania  (or -Url <https URL>)" }
     Write-Host ''
     Write-Host 'Which source code do you want to download?' -ForegroundColor Cyan
     Write-Host ("  [1] StepMania  (github.com/stepmania/stepmania, {0})" -f $games['stepmania'].Size)
     Write-Host ("  [2] ITGmania   (github.com/itgmania/itgmania, {0})" -f $games['itgmania'].Size)
+    Write-Host '  [3] Other repository (e.g. a fork) - paste its URL'
     Write-Host '  [Q] Quit'
     $ans = (Read-Host 'Choice').Trim().ToLower()
-    switch ($ans) { '1' { $Game = 'stepmania' } '2' { $Game = 'itgmania' } default { Write-Host 'Cancelled.'; exit 2 } }
+    switch ($ans) {
+        '1' { $Game = 'stepmania' }
+        '2' { $Game = 'itgmania' }
+        '3' {
+            Write-Host '    Paste the HTTPS address of the repository, e.g. https://github.com/SomeUser/stepmania-fork'
+            Write-Host '    (the builder checks the toolchain, not the source: only use repositories you trust)' -ForegroundColor Yellow
+            $Url = (Read-Host '    Repository URL').Trim()
+            if (-not $Url) { Write-Host 'Cancelled.'; exit 2 }
+        }
+        default { Write-Host 'Cancelled.'; exit 2 }
+    }
 }
-$g = $games[$Game]
+$g = if ($Url) { New-CustomRepo $Url } else { $games[$Game] }
 
 # ---------------------------------------------------------------- target folder
 $Target = [IO.Path]::GetFullPath($Target).TrimEnd('\')
@@ -145,14 +174,18 @@ $cloneArgs += '--progress'      # show progress even when the output is not a te
 $sw = [Diagnostics.Stopwatch]::StartNew()
 # git prints its progress on stderr, straight to the console; do not let PowerShell treat that as an error
 $prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+# Public repositories only: a mistyped or private URL must fail, not wait for a user name/password prompt
+$prevPrompt = $env:GIT_TERMINAL_PROMPT; $env:GIT_TERMINAL_PROMPT = '0'
 & $git @cloneArgs
 $code = $LASTEXITCODE
+$env:GIT_TERMINAL_PROMPT = $prevPrompt
 $ErrorActionPreference = $prevEap
 if ($code -ne 0) {
     # Do not leave a half-downloaded source behind (it would block the next attempt)
     if (Test-Path $cloneTo) { Get-ChildItem $cloneTo -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue }
     if ((-not $existed -or $hasPlaceholder) -and (Test-Path $cloneTo)) { Remove-Item $cloneTo -Force -ErrorAction SilentlyContinue }
-    throw "git clone failed (code $code). Check your internet connection and try again."
+    $hint = if ($Url) { 'Check the URL (it must be a public repository) and your internet connection, then try again.' } else { 'Check your internet connection and try again.' }
+    throw "git clone failed (code $code). $hint"
 }
 $sw.Stop()
 if ($hasPlaceholder) {
@@ -164,4 +197,12 @@ Write-Host "`n    Download finished. Checking the result..."
 $hash = (& $git -C $Target rev-parse --short HEAD) -join ''
 $mb = [math]::Round((Get-ChildItem $Target -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1MB)
 $global:LASTEXITCODE = 0
+$missingSub = @(Get-MissingSubmodules $Target)
+if ($missingSub.Count) {
+    Warn "Some submodules are empty after the download: $($missingSub -join ', ')"
+    Warn "The build will stop until they are there. Inside the source folder run: git submodule update --init --recursive"
+}
+if (-not (Test-Path (Join-Path $Target 'CMakeLists.txt'))) {
+    Warn 'This repository has no CMakeLists.txt in its root: it does not look like StepMania/ITGmania source code.'
+}
 Write-Host ("`n{0} source ready in {1}  (commit {2}, {3} MB, {4:N0} s)" -f $g.Name, $Target, $hash, $mb, $sw.Elapsed.TotalSeconds) -ForegroundColor Green

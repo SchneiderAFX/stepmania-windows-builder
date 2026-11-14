@@ -84,6 +84,27 @@ function Invoke-Curl {
 
 function Format-MB([double]$Bytes) { '{0:N0} MB' -f ($Bytes / 1MB) }
 
+function Get-MissingSubmodules {
+    # Returns the git submodules (paths listed in <Source>\.gitmodules) whose folder is missing or empty.
+    # That is what a GitHub "Download ZIP" gives you: ZIP files do not include submodules.
+    # A source without .gitmodules returns nothing.
+    param([Parameter(Mandatory)][string]$Source)
+    $gm = Join-Path $Source '.gitmodules'
+    if (-not (Test-Path -LiteralPath $gm)) { return @() }
+    $missing = @()
+    foreach ($line in Get-Content -LiteralPath $gm) {
+        if ($line -match '^\s*path\s*=\s*(.+?)\s*$') {
+            $rel = $Matches[1] -replace '/', '\'
+            $dir = Join-Path $Source $rel
+            if (-not (Test-Path -LiteralPath $dir -PathType Container) -or
+                -not (Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+                $missing += $rel
+            }
+        }
+    }
+    return $missing
+}
+
 function Get-DefenderChoice {
     # Decides whether the Defender scan runs. $Mode: 'scan' (just do it), 'skip' (do not), or 'ask'
     # (show the two options and let the user pick; Enter = continue). With no console to answer

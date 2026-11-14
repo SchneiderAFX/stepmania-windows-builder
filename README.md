@@ -32,8 +32,10 @@ The three numbered `.bat` files in the main folder are the recommended order. Do
    When it reaches the Microsoft Defender scan (it can take several minutes) it asks you to **continue** or **skip** it. Skipping is less secure: the files are still checked by hash and Microsoft signature, but not scanned for malware. To stop being asked, set `DEFENDER=scan` or `DEFENDER=skip` inside the `.bat`.
 
 2. **Get the source code** in `.\source`. **This step is only needed if you do not already have StepMania (or ITGmania) in `source\`.** Pick one:
-   - **Let the builder download it**: double-click `2. get-source.bat` and choose StepMania or ITGmania. (If you skip it and `source\` is empty, step 3 offers the same menu, so you cannot get stuck.)
+   - **Let the builder download it**: double-click `2. get-source.bat` and choose StepMania, ITGmania, or **another repository such as a fork** (paste its URL). (If you skip it and `source\` is empty, step 3 offers the same menu, so you cannot get stuck.)
    - **Do it yourself**: paste the source there and skip this step. The folder that contains `CMakeLists.txt`, `src`, `Themes`... can be directly in `source\` or inside one subfolder (e.g. `source\stepmania\`). A `.git` folder is optional.
+
+   > **Do not use GitHub's "Download ZIP" button.** ZIP files do not include the git submodules (`extern\mbedtls`, `extern\libpng`...), so the build cannot work. Use `2. get-source.bat` (it also downloads forks) or `git clone --recursive <URL>`. The builder detects a source without submodules and tells you how to fix it.
 
 3. **Build**: double-click `3. build.bat`.
 
@@ -46,6 +48,8 @@ To change the game's code: edit the files in `.\source` and run the build again.
 `get-source` clones the official repositories over HTTPS (`github.com/stepmania/stepmania`, `github.com/itgmania/itgmania`) **with their submodules**, as a shallow clone (latest commit only: smaller and faster, all that is needed to build). It never downloads into a folder that already has files.
 
 You do **not** need git: it uses the one it finds (PATH, Program Files, GitHub Desktop) or, if there is none, downloads a portable MinGit into `.\tools\git` (official git-for-windows release, SHA-256 verified).
+
+**Forks and other repositories**: choose `[3] Other repository` in the menu and paste its HTTPS address (e.g. `https://github.com/SomeUser/stepmania-fork`), or set `REPO_URL` in `2. get-source.bat`, or run `"2. get-source.bat" -Url <URL>`. It must be a public repository; it is cloned the same way, with submodules. That code is your choice to trust: the builder verifies the toolchain, not the source.
 
 To switch to the other game, rename or empty `source\` and download again (or build from another folder with `-Source <path>`).
 
@@ -80,7 +84,7 @@ set "RUN=0"
 | File | Settings |
 |---|---|
 | `3. build.bat` | `CONFIG`, `NAME`, `SOURCE`, `DOWNLOAD`, `RUN`, `CLEAN`, `SYNC_ONLY`, `NO_PACKAGE`, `NO_PORTABLE`, `SKIP_VERIFY`, `PAUSE_AT_END` |
-| `2. get-source.bat` | `GAME`, `TARGET`, `FULL_HISTORY`, `USE_MINGIT`, `PAUSE_AT_END` |
+| `2. get-source.bat` | `GAME`, `REPO_URL`, `TARGET`, `FULL_HISTORY`, `USE_MINGIT`, `PAUSE_AT_END` |
 | `1. setup-toolchain.bat` | `DEFENDER` (`ask`/`scan`/`skip`), `FORCE`, `SDK_VERSION`, `MSVC_MINOR`, `TOOLCHAIN_DIR`, `PAUSE_AT_END` |
 | `verify-toolchain.bat` | `DEFENDER` (`ask`/`scan`/`skip`), `TOOLCHAIN_DIR`, `PAUSE_AT_END` |
 
@@ -143,7 +147,7 @@ These options go after the `.bat` name (`"3. build.bat" -Run`) or after `.\scrip
 
 ### `get-source`
 
-`-Game stepmania|itgmania`, `-Target <folder>`, `-FullHistory` (download the whole git history), `-UseMinGit` (ignore installed git).
+`-Game stepmania|itgmania`, `-Url <https URL>` (another repository, e.g. a fork; not together with `-Game`), `-Target <folder>`, `-FullHistory` (download the whole git history), `-UseMinGit` (ignore installed git).
 
 ### `setup-toolchain` and `verify-toolchain`
 
@@ -195,6 +199,10 @@ All paths are relative to the scripts, so you can rename or move the folder (eve
 ## Troubleshooting
 
 - **"No source code in ... source"**: run `2. get-source.bat`, or paste the source into `.\source` (it must contain `CMakeLists.txt` and `src\`).
+- **"The source is missing N git submodule(s)"** (or CMake errors such as `extern/mbedtls does not contain a CMakeLists.txt` / `pnglibconf.h.prebuilt does not exist`): the source was downloaded with GitHub's "Download ZIP", which leaves `extern\...` empty. Fix it in one of these ways:
+  - empty `source\` and run `2. get-source.bat` (choose `[3]` and paste the URL for a fork);
+  - or clone it yourself: `git clone --recursive <URL> source`;
+  - if `source\` is already a git clone, `3. build.bat` offers to download the missing submodules for you (or run `git submodule update --init --recursive` inside it).
 - **"Target folder is not empty"** (get-source): `source\` already has files. Rename or empty it first; nothing is overwritten.
 - **Download fails**: check your internet connection and run it again. Nothing half-downloaded is left behind.
 - **Build fails with an Integrity error**: a toolchain file changed. Run `verify-toolchain.bat`; if you do not recognise the change, reinstall with `"1. setup-toolchain.bat" -Force`.

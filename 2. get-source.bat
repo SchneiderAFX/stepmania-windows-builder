@@ -4,8 +4,8 @@ setlocal EnableExtensions
 rem ============================================================================
 rem  SETTINGS - edit the values below, save this file, then double-click it.
 rem
-rem  Downloads the StepMania or ITGmania source code (with all submodules) into
-rem  .\source. You do NOT need git installed: if it is missing, a portable one is
+rem  Downloads the StepMania or ITGmania source code, or another repository such as
+rem  a fork (with all submodules) into .\source. You do NOT need git installed: if it is missing, a portable one is
 rem  downloaded and verified automatically. The target folder must be empty.
 rem
 rem  Anything you type after "2. get-source.bat" on the command line is added at the end
@@ -17,6 +17,12 @@ rem   (empty)   = show a menu and ask
 rem   stepmania = https://github.com/stepmania/stepmania
 rem   itgmania  = https://github.com/itgmania/itgmania
 set "GAME="
+
+rem Or download ANOTHER repository instead, e.g. a fork (HTTPS address, public repository).
+rem Example: https://github.com/SomeUser/stepmania-fork
+rem Leave empty to use GAME / the menu. Only use repositories you trust: the builder
+rem checks the toolchain, not the source code.
+set "REPO_URL="
 
 rem Folder to download into. Empty = .\source
 set "TARGET="
@@ -41,13 +47,19 @@ call :stripslash TARGET
 
 rem If an option is also typed on the command line, it replaces the setting above
 rem (PowerShell does not accept the same option twice).
-echo %* | findstr /i /c:"-Game" >nul && set "GAME="
+rem -Game and -Url exclude each other, so typing either one clears both settings.
+echo %* | findstr /i /c:"-Game" >nul && set "GAME=" && set "REPO_URL="
+echo %* | findstr /i /c:"-Url" >nul && set "GAME=" && set "REPO_URL="
 echo %* | findstr /i /c:"-Target" >nul && set "TARGET="
 echo %* | findstr /i /c:"-FullHistory" >nul && set "FULL_HISTORY=0"
 echo %* | findstr /i /c:"-UseMinGit" >nul && set "USE_MINGIT=0"
 
 set ARGS=
-if defined GAME set ARGS=%ARGS% -Game %GAME%
+if defined REPO_URL (
+    set ARGS=%ARGS% -Url "%REPO_URL%"
+) else if defined GAME (
+    set ARGS=%ARGS% -Game %GAME%
+)
 if defined TARGET set ARGS=%ARGS% -Target "%TARGET%"
 if "%FULL_HISTORY%"=="1" set ARGS=%ARGS% -FullHistory
 if "%USE_MINGIT%"=="1" set ARGS=%ARGS% -UseMinGit
