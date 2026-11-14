@@ -41,7 +41,7 @@ The three numbered `.bat` files in the main folder are the recommended order. Do
 
 3. **Build**: double-click `3. build.bat`.
 
-4. **Play**: the result is in a folder named after the source and the date (US format): `.\stepmania-MMDDYYYY\`, `.\itgmania-MMDDYYYY\`, `.\stepmania-fixes-MMDDYYYY\`... (e.g. `itgmania-11082026`). Run `Program\StepMania.exe` or `Program\ITGmania.exe`.
+4. **Play**: the result is in a folder named after the source, the date (US format) and the time of the build (24 h): `.\stepmania-MMDDYYYY-HHMM\`, `.\itgmania-MMDDYYYY-HHMM\`, `.\stepmania-fixes-MMDDYYYY-HHMM\`... (e.g. `itgmania-11082026-1530` = November 8, 2026 at 15:30). Run `Program\StepMania.exe` or `Program\ITGmania.exe`.
 
 To change the game's code: edit the files in its folder inside `.\source` and run the build again.
 
@@ -111,7 +111,7 @@ builder-folder\
   toolchain\              <- portable MSVC + SDK + CMake + Ninja (created by setup-toolchain)
   tools\git\              <- portable git, only if you had none (created by get-source)
   _work\                  <- internal: working copy + build cache (you are asked after each build whether to delete it)
-  stepmania-MMDDYYYY\     <- the clean builds (output): <source name>-MMDDYYYY
+  stepmania-MMDDYYYY-HHMM\ <- the clean builds (output): <source name>-<US date>-<time>
   1. setup-toolchain.bat  <- step 1: downloads and verifies the toolchain (once)
   2. get-source.bat       <- step 2: downloads StepMania, ITGmania or a fork into source\<name> (only if you need one)
   3. build.bat            <- step 3: builds the game
@@ -132,7 +132,7 @@ You only ever need to touch the four `.bat` files (renaming them, e.g. removing 
 | `portable.ini` (portable mode: `Save`, `Cache`, `Logs` live inside the folder) | Files in the repo root (`CMakeLists.txt`, `.git*`, `README.md`...) |
 | `Announcers`, `BackgroundEffects`, `BackgroundTransitions`, `BGAnimations`, `Characters`, `Courses`, `Data`, `Docs`, `NoteSkins`, `Scripts`, `Songs`, `Themes` | `mapconv.exe`, `.map` files, `Themes\_Installer`, `.git` files of submodule themes |
 
-Running the build again on the same day refreshes the same folder and keeps `Save`, `Cache`, `Logs` and `Screenshots`.
+Every build gets its own folder (the time is part of the name), so older builds are never overwritten. A build that starts in the same minute as the previous one refreshes that folder. With `-Name` / `NAME=`, the same folder is refreshed on every build and its `Save`, `Cache`, `Logs` and `Screenshots` are kept.
 
 ITGmania's optional `Texture Font Generator.exe` is not built (it needs MFC, which is not part of the portable toolchain).
 
@@ -145,7 +145,7 @@ These options go after the `.bat` name (`"3. build.bat" -Run`) or after `.\scrip
 | Option | Description |
 |---|---|
 | `-Config Release\|Debug\|RelWithDebInfo\|MinSizeRel` | Build configuration (default `Release`) |
-| `-Name finished` | Output folder name: `<source name>-finished` (e.g. `stepmania-finished`) instead of the date |
+| `-Name finished` | Output folder name: `<source name>-finished` (e.g. `stepmania-finished`) instead of the date and time; that folder is refreshed on every build |
 | `-Download stepmania\|itgmania` | If there is no source at all, download that game without asking |
 | `-Run` | Launch the game when done |
 | `-Clean` | Rebuild from scratch (needed once after moving or renaming this folder) |
@@ -201,7 +201,7 @@ Notes:
 | `_work\` | Yes (the builder offers to delete it after each build). It is regenerated; the next build is just slower because it compiles everything |
 | `toolchain\_downloads\` | Yes. Only a download cache |
 | `*.log` | Yes |
-| `<source name>-MMDDYYYY\` (e.g. `stepmania-11142026\`) | Yes, but copy its `Save\` first if you played in it (preferences, profiles, scores) |
+| `<source name>-MMDDYYYY-HHMM\` (e.g. `stepmania-11142026-1530\`) | Yes, but copy its `Save\` first if you played in it (preferences, profiles, scores). Since every build creates a new folder, delete the old ones from time to time |
 
 ## Moving or renaming this folder
 

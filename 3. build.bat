@@ -13,7 +13,9 @@ set "CONFIG=Release"
 
 rem Name of the output folder: SOURCE-NAME (SOURCE is the name of the source folder,
 rem e.g. stepmania, itgmania or your fork's name).
-rem Leave empty to use today's date in US format (e.g. itgmania-MMddyyyy).
+rem Leave empty to use the date (US format) and time (24 h) of the build,
+rem e.g. itgmania-11142026-1530. Every build then gets a new folder.
+rem With a NAME, the same folder is refreshed on every build (Save, Cache and Logs are kept).
 set "NAME="
 
 rem Which source to build: the name of a folder inside source\ (e.g. itgmania or

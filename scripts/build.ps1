@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Builds StepMania or ITGmania from .\source and produces a CLEAN, ready-to-play build
-  in .\<source name>-MMDDYYYY (e.g. stepmania-11142026)
+  in .\<source name>-MMDDYYYY-HHMM (e.g. stepmania-11142026-1530)
 
 .DESCRIPTION
   Workflow:
@@ -13,14 +13,15 @@
          - mirrors the source (without .git) to .\_work\<name>\stage   (the game's CMake writes the .exe
            into <source>\Program, which is why the build is done on a copy)
          - compiles with CMake + Ninja + MSVC into .\_work\<name>\build\<Config>   (incremental)
-         - packages a clean build into  .\<name>-MMDDYYYY   (US date format)
+         - packages a clean build into  .\<name>-MMDDYYYY-HHMM   (US date + time of the build, 24 h)
     3. The clean build contains ONLY what a ready-to-play build ships with:
          Program\ (the .exe, its .vdi, DLLs), portable.ini and the data folders
          (Announcers, BackgroundEffects, BackgroundTransitions, BGAnimations, Characters, Courses,
           Data, Docs, NoteSkins, Scripts, Songs, Themes).
        It does NOT contain: src, extern, CMake, Build, Installer, Manual, Utils, Xcode, icons, _assets,
          files in the repo root (CMakeLists, .git*, README...), mapconv.exe, .map, Themes\_Installer.
-    If you run it again on the same day, the same folder is refreshed (Save, Cache, Logs and
+    Every build gets a new folder (the time is part of the name), so older builds are never
+    overwritten. With -Name, the same folder is refreshed instead (Save, Cache, Logs and
     Screenshots are kept).
 
   Toolchain: uses the portable toolchain in .\toolchain if present (see setup-toolchain.ps1),
@@ -30,7 +31,7 @@
   (Paths such as .\source are relative to the builder folder, the parent of the scripts folder.
    Normally you just double-click 3. build.bat; these are the direct PowerShell equivalents.)
 
-  .\scripts\build.ps1                       # incremental build -> .\stepmania-11082026 (or .\itgmania-11082026)
+  .\scripts\build.ps1                       # build -> .\stepmania-11082026-1530 (or .\itgmania-11082026-1530)
   .\scripts\build.ps1 -Download itgmania    # if .\source is empty, download ITGmania there, then build it
   .\scripts\build.ps1 -Run                  # build, package and launch the game from the clean folder
   .\scripts\build.ps1 -Source itgmania      # build source\itgmania without asking
@@ -54,7 +55,7 @@ param(
     # Internal folder holding the working copy and build objects. Empty = .\_work
     [string]$Work = '',
 
-    # Name of the final folder: <source name>-<Name>. Empty = US date (MMddyyyy)
+    # Name of the final folder: <source name>-<Name>. Empty = US date + time (MMddyyyy-HHmm)
     [string]$Name = '',
 
     # Only used without .\toolchain. Empty = auto-detect the newest Visual Studio.
@@ -513,8 +514,8 @@ if (-not $NoPackage) {
     # Data folders shipped in a clean build (same layout for StepMania and ITGmania)
     $dataDirs  = 'Announcers', 'BackgroundEffects', 'BackgroundTransitions', 'BGAnimations', 'Characters',
                  'Courses', 'Data', 'Docs', 'NoteSkins', 'Scripts', 'Songs', 'Themes'
-    # Named after the source folder: stepmania-MMddyyyy, itgmania-MMddyyyy, my-fork-MMddyyyy...
-    $folder    = if ($Name) { "$srcName-$Name" } else { "$srcName-" + (Get-Date -Format 'MMddyyyy') }
+    # Named after the source folder + US date + time (24 h): stepmania-11142026-1530, my-fork-11142026-0905...
+    $folder    = if ($Name) { "$srcName-$Name" } else { "$srcName-" + (Get-Date -Format 'MMddyyyy-HHmm') }
     $outDir    = Join-Path $Root $folder
     Step "Packaging clean build: $outDir"
     New-Item -ItemType Directory -Force $outDir | Out-Null
