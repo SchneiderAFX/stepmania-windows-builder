@@ -36,7 +36,7 @@ set ARGS=
 if defined DEFENDER set ARGS=%ARGS% -Defender %DEFENDER%
 if defined TOOLCHAIN_DIR set ARGS=%ARGS% -ToolchainDir "%TOOLCHAIN_DIR%"
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\verify-toolchain.ps1" %ARGS% %*
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\scripts\verify-toolchain.ps1" %ARGS% %*
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.

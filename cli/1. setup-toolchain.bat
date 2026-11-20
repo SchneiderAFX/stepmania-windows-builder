@@ -56,7 +56,7 @@ if defined MSVC_MINOR set ARGS=%ARGS% -MsvcMinor %MSVC_MINOR%
 if defined TOOLCHAIN_DIR set ARGS=%ARGS% -ToolchainDir "%TOOLCHAIN_DIR%"
 
 echo Running: setup-toolchain.ps1%ARGS% %*
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\setup-toolchain.ps1" %ARGS% %*
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\scripts\setup-toolchain.ps1" %ARGS% %*
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.

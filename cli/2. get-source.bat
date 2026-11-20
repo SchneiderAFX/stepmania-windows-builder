@@ -73,7 +73,7 @@ if defined TARGET set ARGS=%ARGS% -Target "%TARGET%"
 if "%FULL_HISTORY%"=="1" set ARGS=%ARGS% -FullHistory
 if "%USE_MINGIT%"=="1" set ARGS=%ARGS% -UseMinGit
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\get-source.ps1" %ARGS% %*
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\scripts\get-source.ps1" %ARGS% %*
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.

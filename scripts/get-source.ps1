@@ -50,7 +50,17 @@ param(
     [string]$Target = '',
 
     [switch]$FullHistory,   # download the whole git history (slower, larger)
-    [switch]$UseMinGit      # ignore any installed git and use the portable MinGit
+    [switch]$UseMinGit,     # ignore any installed git and use the portable MinGit
+
+    # Folder source\<name> already exists: ask (default), rename (download as <name>-2), replace (delete it
+    # first; no confirmation is asked, the caller must have asked), cancel.
+    [ValidateSet('ask', 'rename', 'replace', 'cancel')]
+    [string]$IfExists = 'ask',
+
+    # A source pasted directly in source\ (older layout) must be moved into its own folder first:
+    # ask (default), yes (move it), no (cancel).
+    [ValidateSet('ask', 'yes', 'no')]
+    [string]$MoveOld = 'ask'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -192,7 +202,8 @@ if (-not $explicitTarget) {
         Write-Host "source\ already holds a source directly in it: $SourceRoot" -ForegroundColor Yellow
         Write-Host '    To keep several sources side by side, each one needs its own folder.'
         Write-Host "    The existing one will be MOVED (not changed) to: source\$oldFolder"
-        if ((Read-Answer '    Move it now? [Y/N]') -notmatch '^(y|yes|s|si)$') {
+        $moveOk = if ($MoveOld -eq 'ask') { (Read-Answer '    Move it now? [Y/N]') -match '^(y|yes|s|si)$' } else { $MoveOld -eq 'yes' }
+        if (-not $moveOk) {
             Write-Host "Cancelled. Nothing was changed. (Or move it yourself into a folder such as source\$oldFolder.)"
             exit 2
         }
@@ -210,13 +221,18 @@ if (-not $explicitTarget) {
         $free = Get-FreeName $SourceRoot $folder
         Write-Host ''
         Write-Host "A source named '$folder' already exists: $Target" -ForegroundColor Yellow
-        Write-Host "  [1] Keep it, and download the new one as source\$free   (recommended)"
-        Write-Host "  [2] DELETE it and download it again   (any change you made in it will be LOST)" -ForegroundColor Yellow
-        Write-Host '  [Q] Cancel'
-        switch -Regex (Read-Answer 'Choice [1]') {
-            '^1?$' { $folder = $free; $Target = Join-Path $SourceRoot $folder }
+        $choice = switch ($IfExists) { 'rename' { '1' } 'replace' { '2' } 'cancel' { 'q' } default { $null } }
+        if ($null -eq $choice) {
+            Write-Host "  [1] Keep it, and download the new one as source\$free   (recommended)"
+            Write-Host "  [2] DELETE it and download it again   (any change you made in it will be LOST)" -ForegroundColor Yellow
+            Write-Host '  [Q] Cancel'
+            $choice = Read-Answer 'Choice [1]'
+        }
+        switch -Regex ($choice) {
+            '^1?$' { $folder = $free; $Target = Join-Path $SourceRoot $folder; Write-Host "    Downloading as source\$folder" }
             '^2$'  {
-                if ((Read-Answer "    Delete source\$folder for good? Type YES to confirm") -ne 'yes') { Write-Host 'Cancelled. Nothing was deleted.'; exit 2 }
+                # (-IfExists replace: the caller already asked for confirmation)
+                if ($IfExists -ne 'replace' -and (Read-Answer "    Delete source\$folder for good? Type YES to confirm") -ne 'yes') { Write-Host 'Cancelled. Nothing was deleted.'; exit 2 }
                 Write-Host "    Deleting source\$folder..."
                 Remove-Folder $Target
                 Ok 'Deleted'
@@ -292,7 +308,7 @@ if (-not (Test-Path (Join-Path $Target 'CMakeLists.txt'))) {
     Warn 'This repository has no CMakeLists.txt in its root: it does not look like StepMania/ITGmania source code.'
 }
 if (-not $explicitTarget) {
-    # 3. build.bat offers this source first (Enter) when there are several
+    # cli\3. build.bat offers this source first (Enter) when there are several
     try { Set-Content -LiteralPath (Join-Path $scriptsDir '.last-source') -Value (Split-Path $Target -Leaf) -Encoding ascii } catch { }
 }
 Write-Host ("`n{0} source ready in {1}  (commit {2}, {3} MB, {4:N0} s)" -f $g.Name, $Target, $hash, $mb, $sw.Elapsed.TotalSeconds) -ForegroundColor Green

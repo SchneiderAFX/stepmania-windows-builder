@@ -14,7 +14,7 @@
     2. Authenticode signature ("Valid" + signer Microsoft Corporation) of every downloaded MSI
        and of ALL .exe/.dll files extracted from MSVC and the SDK. (Independent of the manifest.)
     3. SHA-256 inventory of the whole folder (toolchain\inventory.json) to detect later
-       tampering:  verify-toolchain.bat
+       tampering:  cli\verify-toolchain.bat
     4. Microsoft Defender scan (if available). When it is reached you are asked to continue or skip it
        (-Defender scan = always scan, -Defender skip or -SkipDefender = never scan).
 

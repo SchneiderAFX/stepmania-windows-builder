@@ -84,6 +84,20 @@ function Invoke-Curl {
 
 function Format-MB([double]$Bytes) { '{0:N0} MB' -f ($Bytes / 1MB) }
 
+function Find-GitExe {
+    # git from PATH, Program Files, GitHub Desktop, or the portable MinGit in <builder>\tools\git. $null if none.
+    param([string]$BuilderRoot)
+    $c = Get-Command git.exe -ErrorAction SilentlyContinue
+    if ($c) { return $c.Source }
+    $cands = @("$env:ProgramFiles\Git\cmd\git.exe", "${env:ProgramFiles(x86)}\Git\cmd\git.exe", "$env:LOCALAPPDATA\Programs\Git\cmd\git.exe")
+    if ($BuilderRoot) { $cands += Join-Path $BuilderRoot 'tools\git\cmd\git.exe' }
+    foreach ($p in $cands) { if ($p -and (Test-Path -LiteralPath $p)) { return $p } }
+    return (Get-ChildItem "$env:LOCALAPPDATA\GitHubDesktop" -Directory -Filter 'app-*' -ErrorAction SilentlyContinue |
+            Sort-Object { try { [version]($_.Name -replace '^app-', '') } catch { [version]'0.0' } } -Descending |
+            ForEach-Object { Join-Path $_.FullName 'resources\app\git\cmd\git.exe' } |
+            Where-Object { Test-Path $_ } | Select-Object -First 1)
+}
+
 function Get-MissingSubmodules {
     # Returns the git submodules (paths listed in <Source>\.gitmodules) whose folder is missing or empty.
     # That is what a GitHub "Download ZIP" gives you: ZIP files do not include submodules.

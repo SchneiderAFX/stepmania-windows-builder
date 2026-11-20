@@ -34,6 +34,10 @@ rem --- On/off options: 1 = yes, 0 = no ----------------------------------------
 rem Launch the game when the build finishes.
 set "RUN=0"
 
+rem Copy the Save folder (preferences, profiles, scores) of your newest previous build
+rem of the same source into the new one, so you keep playing with your data.
+set "COPY_SAVE=0"
+
 rem After a successful build, delete the internal _work folder (working copy + build cache)?
 rem   ask = ask at the end (Enter = keep it)
 rem   yes = delete it without asking: tidier, but the NEXT build is slower because it
@@ -73,6 +77,7 @@ echo %* | findstr /i /c:"-Name" >nul && set "NAME="
 echo %* | findstr /i /c:"-Source" >nul && set "SOURCE="
 echo %* | findstr /i /c:"-Download" >nul && set "DOWNLOAD="
 echo %* | findstr /i /c:"-Run" >nul && set "RUN=0"
+echo %* | findstr /i /c:"-CopySave" >nul && set "COPY_SAVE=0"
 echo %* | findstr /i /c:"-Clean" >nul && set "CLEAN=0"
 echo %* | findstr /i /c:"-SyncOnly" >nul && set "SYNC_ONLY=0"
 echo %* | findstr /i /c:"-NoPackage" >nul && set "NO_PACKAGE=0"
@@ -87,6 +92,7 @@ if defined NAME set ARGS=%ARGS% -Name "%NAME%"
 if defined SOURCE set ARGS=%ARGS% -Source "%SOURCE%"
 if defined DOWNLOAD set ARGS=%ARGS% -Download %DOWNLOAD%
 if "%RUN%"=="1" set ARGS=%ARGS% -Run
+if "%COPY_SAVE%"=="1" set ARGS=%ARGS% -CopySave
 if "%CLEAN%"=="1" set ARGS=%ARGS% -Clean
 if "%SYNC_ONLY%"=="1" set ARGS=%ARGS% -SyncOnly
 if "%NO_PACKAGE%"=="1" set ARGS=%ARGS% -NoPackage
@@ -95,7 +101,7 @@ if "%SKIP_VERIFY%"=="1" set ARGS=%ARGS% -SkipVerify
 if defined DELETE_WORK set ARGS=%ARGS% -DeleteWork %DELETE_WORK%
 
 echo Running: build.ps1 %ARGS% %*
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build.ps1" %ARGS% %*
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\scripts\build.ps1" %ARGS% %*
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.

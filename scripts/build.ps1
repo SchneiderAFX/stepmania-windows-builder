@@ -9,7 +9,7 @@
        (source\stepmania, source\itgmania, source\my-fork...) or a single source directly in .\source.
        If .\source is empty, the script offers to download one for you (see get-source.ps1).
        With several sources it asks which one to build (Enter = the last one built).
-    2. Run "3. build.bat" (or scripts\build.ps1). The game (StepMania / ITGmania) is detected automatically. Internally it:
+    2. Run "cli\3. build.bat" (or scripts\build.ps1). The game (StepMania / ITGmania) is detected automatically. Internally it:
          - mirrors the source (without .git) to .\_work\<name>\stage   (the game's CMake writes the .exe
            into <source>\Program, which is why the build is done on a copy)
          - compiles with CMake + Ninja + MSVC into .\_work\<name>\build\<Config>   (incremental)
@@ -29,7 +29,7 @@
 
 .EXAMPLE
   (Paths such as .\source are relative to the builder folder, the parent of the scripts folder.
-   Normally you just double-click 3. build.bat; these are the direct PowerShell equivalents.)
+   Normally you just double-click cli\3. build.bat; these are the direct PowerShell equivalents.)
 
   .\scripts\build.ps1                       # build -> .\stepmania-11082026-1530 (or .\itgmania-11082026-1530)
   .\scripts\build.ps1 -Download itgmania    # if .\source is empty, download ITGmania there, then build it
@@ -76,7 +76,11 @@ param(
     #   no  = keep without asking (the next build only recompiles what changed)
     [ValidateSet('ask', 'yes', 'no')]
     [string]$DeleteWork = 'ask',
-    [switch]$KeepWork    # same as -DeleteWork no
+    [switch]$KeepWork,   # same as -DeleteWork no
+
+    # Copy the Save folder (preferences, profiles, scores) of the newest previous build of the same source
+    # into the new build, so you keep playing with your data. Nothing is copied if the new build has a Save.
+    [switch]$CopySave
 )
 
 $ErrorActionPreference = 'Stop'
@@ -188,7 +192,7 @@ if (-not $list.Count) {
     }
     if (-not $list.Count) {
         if ($isEmpty) {
-            throw "No source code in '$base'. Run 2. get-source.bat (or build.ps1 -Download stepmania|itgmania) to download it, or paste it there yourself."
+            throw "No source code in '$base'. Run cli\2. get-source.bat (or build.ps1 -Download stepmania|itgmania) to download it, or paste it there yourself."
         } else {
             throw "StepMania/ITGmania source code not found in: $base`nPut each source in its own folder inside it (the folder that contains CMakeLists.txt, src, Themes...), or use -Source <path>."
         }
@@ -226,12 +230,12 @@ if ($list.Count -eq 1) {
             try { $ans = "$(Read-Host $prompt)".Trim() } catch { }
             if ($ans -eq '' -and $defIdx -ge 0) { $pick = $list[$defIdx] }
             elseif ($ans -eq '' -and [Console]::IsInputRedirected) {
-                throw "Several sources found in ${base}: $names`nChoose one with -Source <name> (or SOURCE=<name> in 3. build.bat)."
+                throw "Several sources found in ${base}: $names`nChoose one with -Source <name> (or SOURCE=<name> in cli\3. build.bat)."
             }
             elseif ($ans -match '^[qQ]$') { Write-Host 'Cancelled.'; exit 2 }
             elseif ($ans -match '^\d+$' -and [int]$ans -ge 1 -and [int]$ans -le $list.Count) { $pick = $list[[int]$ans - 1] }
             else {
-                if (++$tries -ge 5) { throw "No valid choice. Use -Source <name> (or SOURCE=<name> in 3. build.bat). Sources: $names" }
+                if (++$tries -ge 5) { throw "No valid choice. Use -Source <name> (or SOURCE=<name> in cli\3. build.bat). Sources: $names" }
                 Write-Host '    Type one of the numbers above (or Q to quit).'
             }
         }
@@ -277,7 +281,7 @@ if ($missingSub.Count) {
                else { "This happens when the code is downloaded with GitHub's `"Download ZIP`" button: ZIP files do not include submodules." }
         throw ("The source is missing $($missingSub.Count) git submodule(s): $subList`n" + $why + "`n" +
                "Fix (pick one):`n" +
-               "  - Delete this folder and download it again with 2. get-source.bat (StepMania, ITGmania, or paste the URL of a fork)`n" +
+               "  - Delete this folder and download it again with cli\2. get-source.bat (StepMania, ITGmania, or paste the URL of a fork)`n" +
                "  - Or clone it yourself:  git clone --recursive <repository URL> source\<name>`n" +
                "  - If the folder is already a git clone, run inside it:  git submodule update --init --recursive")
     }
@@ -297,7 +301,7 @@ if ($portable) {
     $CMakeExe = Join-Path $tc 'cmake\bin\cmake.exe'
 } else {
     if (-not $CMakeExe) { $c = Get-Command cmake.exe -ErrorAction SilentlyContinue; if ($c) { $CMakeExe = $c.Source } }
-    if (-not $CMakeExe -or -not (Test-Path $CMakeExe)) { throw "cmake not found. Run 1. setup-toolchain.bat to get the portable toolchain, or install CMake and put it in PATH (or pass -CMakeExe)." }
+    if (-not $CMakeExe -or -not (Test-Path $CMakeExe)) { throw "cmake not found. Run cli\1. setup-toolchain.bat to get the portable toolchain, or install CMake and put it in PATH (or pass -CMakeExe)." }
 }
 
 if (-not $portable -and -not $VsRoot) {
@@ -313,7 +317,7 @@ if (-not $portable -and -not $VsRoot) {
         }
     }
     $best = $cands | Sort-Object Year -Descending | Select-Object -First 1
-    if (-not $best) { throw "No Visual Studio with C++ found. Run 1. setup-toolchain.bat, or install VS 2022 Build Tools ('Desktop development with C++'), or pass -VsRoot." }
+    if (-not $best) { throw "No Visual Studio with C++ found. Run cli\1. setup-toolchain.bat, or install VS 2022 Build Tools ('Desktop development with C++'), or pass -VsRoot." }
     $VsRoot = $best.Path
     if ($best.Year -lt 2022) {
         Write-Warning "Only Visual Studio $($best.Year) found. This source needs toolset v143 (VS 2022); with VS $($best.Year) mbedtls/ixwebsocket fail to compile."
@@ -338,6 +342,14 @@ $srcWork  = Join-Path $workFull $srcName
 $stage    = Join-Path $srcWork 'stage'
 $buildDir = Join-Path $srcWork "build\$Config"
 
+# MSVC cannot use paths longer than 260 characters. The deepest object file inside the build folder adds
+# about 140 characters (extern\CMakeFiles\tomcrypt.dir\<hash>\der_decode_subject_public_key_info.c.obj).
+if (($buildDir.Length + 140) -gt 255) {
+    Warn "This folder's path is long: $Root"
+    Warn "The compiler cannot use paths over 260 characters, so the build may fail with 'C1083 ... Invalid argument'."
+    Warn 'If it does, move the builder to a shorter path (e.g. D:\SMBuilder) or give the source folder a shorter name.'
+}
+
 # Older versions of the builder used _work\stepmania (copy) and _work\build\<Config> for the only source.
 # Remove them once (only cache; the next build of that source recompiles everything).
 $oldStage = Join-Path $workFull 'stepmania'
@@ -359,8 +371,10 @@ Step "Syncing source: $srcFull -> $stage"
 Write-Host '    The first time this copies the whole source (several hundred MB); later runs only copy what changed.'
 # /MIR : copies new/changed files and removes from the COPY what no longer exists in the source
 # /XD  : leave .git and runtime/output folders alone (neither copied nor deleted)
+# /XF  : CMake\SMDefs.cmake is written by this script instead (version stamp, see below)
 # Robocopy keeps timestamps, so Ninja only recompiles what really changed.
-$rcCode = Invoke-WithSpinner -FilePath 'robocopy.exe' -Arguments ('"{0}" "{1}" /MIR /XD .git Program Cache Save Logs /NFL /NDL /NJH /NJS /NP /MT:16' -f $srcFull, $stage) -Label 'Copying source files'
+$smDefsSrc = Join-Path $srcFull 'CMake\SMDefs.cmake'
+$rcCode = Invoke-WithSpinner -FilePath 'robocopy.exe' -Arguments ('"{0}" "{1}" /MIR /XD .git Program Cache Save Logs /XF "{2}" /NFL /NDL /NJH /NJS /NP /MT:16' -f $srcFull, $stage, $smDefsSrc) -Label 'Copying source files'
 if ($rcCode -ge 8) { throw "robocopy failed (code $rcCode)" }
 Ok 'Source synced'
 
@@ -391,17 +405,60 @@ if ($gitExe -and (Test-Path $srcGitDir -PathType Container)) {
 }
 $global:LASTEXITCODE = 0
 
+# Version stamp: add the date of the source to the version the game shows, e.g.
+#   5.1.0-git-208bc90  ->  5.1.0-git-208bc90-11122026   (date of the last commit, US format)
+#   5.1.0-UNKNOWN      ->  5.1.0-11122026               (no git info: date of the newest source file)
+# Done by appending a few lines to the COPY of CMake\SMDefs.cmake in _work (your source is not touched).
+# The file is only rewritten when its content changes, so incremental builds stay incremental.
+$smDefsStage = Join-Path $stage 'CMake\SMDefs.cmake'
+if (Test-Path -LiteralPath $smDefsSrc) {
+    $srcDate = ''
+    if ($commit) {
+        $srcDate = ((& $gitExe -C $stage log -1 --format=%cd --date=format:%m%d%Y 2>$null) -join '').Trim()
+        $global:LASTEXITCODE = 0
+        if ($srcDate) { Write-Host "Source date:   $srcDate (last commit)" }
+    }
+    if (-not $srcDate) {
+        $skip = '\\(\.git|Program|Cache|Save|Logs)(\\|$)'
+        $newest = Get-ChildItem -LiteralPath $srcFull -Recurse -File -Force -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName.Substring($srcFull.Length) -notmatch $skip } |
+                  Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($newest) { $srcDate = $newest.LastWriteTime.ToString('MMddyyyy'); Write-Host "Source date:   $srcDate (no git info: newest source file)" }
+    }
+    $orig = [IO.File]::ReadAllText($smDefsSrc)
+    $want = $orig
+    if ($srcDate) {
+        $want = $orig.TrimEnd() + "`n`n" + (@(
+            '# ---- Added by StepMania Windows Builder (only in its working copy, never in your source) ----',
+            '# Adds the date of the source to the version: 5.1.0-git-<hash>-MMDDYYYY, or 5.1.0-MMDDYYYY without git.',
+            "set(SMB_SOURCE_DATE `"$srcDate`")",
+            'if(SM_VERSION_GIT_HASH STREQUAL "UNKNOWN")',
+            '  string(REPLACE "-UNKNOWN" "-${SMB_SOURCE_DATE}" SM_VERSION_GIT "${SM_VERSION_GIT}")',
+            '  set(SM_VERSION_GIT_HASH "${SMB_SOURCE_DATE}")',
+            'elseif(SM_VERSION_GIT_HASH)',
+            '  string(REPLACE "-git-${SM_VERSION_GIT_HASH}" "-git-${SM_VERSION_GIT_HASH}-${SMB_SOURCE_DATE}" SM_VERSION_GIT "${SM_VERSION_GIT}")',
+            '  set(SM_VERSION_GIT_HASH "${SM_VERSION_GIT_HASH}-${SMB_SOURCE_DATE}")',
+            'endif()') -join "`n") + "`n"
+    }
+    $have = if (Test-Path -LiteralPath $smDefsStage) { [IO.File]::ReadAllText($smDefsStage) } else { $null }
+    if ($have -cne $want) {
+        [IO.File]::WriteAllText($smDefsStage, $want, (New-Object Text.UTF8Encoding($false)))
+    }
+} elseif (Test-Path -LiteralPath $smDefsStage) {
+    Remove-Item -LiteralPath $smDefsStage -Force      # the source no longer has it: mirror that
+}
+
 # ---- 2. MSVC environment (x64) --------------------------------------------
 if ($portable) {
     Step "Portable toolchain environment (x64)"
     # Quick integrity check of the key tools against the inventory (full check: verify-toolchain.ps1)
     if (-not $SkipVerify) {
         $invFile = Join-Path $tc 'inventory.json'
-        if (-not (Test-Path $invFile)) { throw "toolchain\inventory.json is missing. Run 1. setup-toolchain.bat (or use -NoPortable)." }
+        if (-not (Test-Path $invFile)) { throw "toolchain\inventory.json is missing. Run cli\1. setup-toolchain.bat (or use -NoPortable)." }
         $inv = Get-Content $invFile -Raw | ConvertFrom-Json
         $keys = $inv.PSObject.Properties.Name | Where-Object { $_ -match '(?i)^(msvc\\VC\\Tools\\MSVC\\[^\\]+\\bin\\Hostx64\\x64\\(cl|link|lib|c1|c1xx|c2|mspdb\d+|tbbmalloc|vcruntime\d+(_1)?)\.(exe|dll)|cmake\\bin\\cmake\.exe|ninja\\ninja\.exe|sdk\\Windows Kits\\10\\bin\\[^\\]+\\x64\\(rc|rcdll|mt)\.(exe|dll))$' }
         foreach ($k in $keys) {
-            if ((Get-FileHash (Join-Path $tc $k) -Algorithm SHA256).Hash -ine $inv.$k) { throw "INTEGRITY: '$k' was modified since installation. Aborting. (run verify-toolchain.bat for details)" }
+            if ((Get-FileHash (Join-Path $tc $k) -Algorithm SHA256).Hash -ine $inv.$k) { throw "INTEGRITY: '$k' was modified since installation. Aborting. (run cli\verify-toolchain.bat for details)" }
         }
         Write-Host "    Integrity OK ($($keys.Count) key tools checked)"
     }
@@ -553,6 +610,28 @@ if (-not $NoPackage) {
     $global:LASTEXITCODE = 0
     Write-Bar 'Packaging' ($dataDirs.Count + 1) ($dataDirs.Count + 1) 'done' -Force
     Complete-Bar
+
+    # -CopySave: bring your preferences, profiles and scores from the newest previous build of this source
+    if ($CopySave) {
+        $outSave = Join-Path $outDir 'Save'
+        if (Get-ChildItem -LiteralPath $outSave -Recurse -File -Force -ErrorAction SilentlyContinue | Select-Object -First 1) {
+            Write-Host '    Save: this folder already has its own Save, left as it is.'
+        } else {
+            $prev = Get-ChildItem -LiteralPath $Root -Directory |
+                    Where-Object { $_.FullName -ine $outDir -and $_.Name.StartsWith("$srcName-", 'OrdinalIgnoreCase') -and
+                                   (Test-Path -LiteralPath (Join-Path $_.FullName 'portable.ini')) -and
+                                   (Get-ChildItem -LiteralPath (Join-Path $_.FullName 'Save') -Recurse -File -Force -ErrorAction SilentlyContinue | Select-Object -First 1) } |
+                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($prev) {
+                robocopy (Join-Path $prev.FullName 'Save') $outSave /E /NFL /NDL /NJH /NJS /NP | Out-Null
+                if ($LASTEXITCODE -ge 8) { Warn "Could not copy Save from $($prev.Name) (robocopy code $LASTEXITCODE)" }
+                else { Ok "Save copied from $($prev.Name) (preferences, profiles and scores)" }
+                $global:LASTEXITCODE = 0
+            } else {
+                Write-Host "    Save: no previous build of '$srcName' with a Save to copy (this build starts fresh)."
+            }
+        }
+    }
     $finalExe = (Get-ChildItem $progOut -Filter '*.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
     $finalDir = $outDir
     $mb = [math]::Round((Get-ChildItem $outDir -Recurse -File | Measure-Object Length -Sum).Sum / 1MB)

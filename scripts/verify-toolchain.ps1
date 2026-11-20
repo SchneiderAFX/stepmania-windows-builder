@@ -25,11 +25,11 @@ $scriptsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $here       = Split-Path -Parent $scriptsDir          # builder folder (this script lives in <builder>\scripts)
 . (Join-Path $scriptsDir 'progress.ps1')
 if (-not $ToolchainDir) { $ToolchainDir = Join-Path $here 'toolchain' }
-if (-not (Test-Path $ToolchainDir)) { throw "Toolchain folder not found: $ToolchainDir (run 1. setup-toolchain.bat first)." }
+if (-not (Test-Path $ToolchainDir)) { throw "Toolchain folder not found: $ToolchainDir (run cli\1. setup-toolchain.bat first)." }
 # full, long-form absolute path (the inventory stores paths relative to it)
 $ToolchainDir = (Get-Item -LiteralPath $ToolchainDir).FullName.TrimEnd('\')
 $invFile = Join-Path $ToolchainDir 'inventory.json'
-if (-not (Test-Path $invFile)) { throw "No inventory found: run 1. setup-toolchain.bat first." }
+if (-not (Test-Path $invFile)) { throw "No inventory found: run cli\1. setup-toolchain.bat first." }
 
 if ($SkipDefender) { $Defender = 'skip' }
 Set-Steps $(if ($Defender -eq 'skip') { 2 } else { 3 })
