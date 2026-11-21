@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Builds StepMania or ITGmania from .\source and produces a CLEAN, ready-to-play build
-  in .\<source name>-MMDDYYYY-HHMM (e.g. stepmania-11142026-1530)
+  in .\<source name> (e.g. stepmania-fixes): one folder per source, always with the same name
 
 .DESCRIPTION
   Workflow:
@@ -13,16 +13,18 @@
          - mirrors the source (without .git) to .\_work\<name>\stage   (the game's CMake writes the .exe
            into <source>\Program, which is why the build is done on a copy)
          - compiles with CMake + Ninja + MSVC into .\_work\<name>\build\<Config>   (incremental)
-         - packages a clean build into  .\<name>-MMDDYYYY-HHMM   (US date + time of the build, 24 h)
+         - packages a clean build into  .\<name>   (the same name as the source folder; the build
+           remembers its commit in .builder-build.json)
     3. The clean build contains ONLY what a ready-to-play build ships with:
          Program\ (the .exe, its .vdi, DLLs), portable.ini and the data folders
          (Announcers, BackgroundEffects, BackgroundTransitions, BGAnimations, Characters, Courses,
           Data, Docs, NoteSkins, Scripts, Songs, Themes).
        It does NOT contain: src, extern, CMake, Build, Installer, Manual, Utils, Xcode, icons, _assets,
          files in the repo root (CMakeLists, .git*, README...), mapconv.exe, .map, Themes\_Installer.
-    Every build gets a new folder (the time is part of the name), so older builds are never
-    overwritten. With -Name, the same folder is refreshed instead (Save, Cache, Logs and
-    Screenshots are kept).
+    Each source has ONE build folder, always with the same name. Building again refreshes it (Save,
+    Cache, Logs, Screenshots and the files you added are kept). When the source moved to another
+    commit, you are asked whether to update the build (-UpdateBuild yes|no answers it for you).
+    Builds made by older versions of the builder (<name>-<commit>, <name>-MMDDYYYY-HHMM) are renamed.
 
   Toolchain: uses the portable toolchain in .\toolchain if present (see setup-toolchain.ps1),
   otherwise falls back to an installed Visual Studio (2022 / toolset v143 required).
@@ -31,7 +33,7 @@
   (Paths such as .\source are relative to the builder folder, the parent of the scripts folder.
    Normally you just double-click cli\3. build.bat; these are the direct PowerShell equivalents.)
 
-  .\scripts\build.ps1                       # build -> .\stepmania-11082026-1530 (or .\itgmania-11082026-1530)
+  .\scripts\build.ps1                       # build -> .\stepmania (or .\itgmania, .\<fork name>)
   .\scripts\build.ps1 -Download itgmania    # if .\source is empty, download ITGmania there, then build it
   .\scripts\build.ps1 -Run                  # build, package and launch the game from the clean folder
   .\scripts\build.ps1 -Source itgmania      # build source\itgmania without asking
@@ -55,7 +57,7 @@ param(
     # Internal folder holding the working copy and build objects. Empty = .\_work
     [string]$Work = '',
 
-    # Name of the final folder: <source name>-<Name>. Empty = US date + time (MMddyyyy-HHmm)
+    # Name of the final folder: <source name>-<Name>. Empty = the source folder's name (e.g. stepmania-fixes).
     [string]$Name = '',
 
     # Only used without .\toolchain. Empty = auto-detect the newest Visual Studio.
@@ -80,7 +82,13 @@ param(
 
     # Copy the Save folder (preferences, profiles, scores) of the newest previous build of the same source
     # into the new build, so you keep playing with your data. Nothing is copied if the new build has a Save.
-    [switch]$CopySave
+    [switch]$CopySave,
+
+    # Each source has ONE build folder, which remembers its commit. When the source moved to another
+    # commit: update that build (refreshed; its Save and the files you added are kept)?
+    #   ask = ask before building (default; Enter or no console = yes)   yes = update   no = stop, build nothing
+    [ValidateSet('ask', 'yes', 'no')]
+    [string]$UpdateBuild = 'ask'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -292,6 +300,34 @@ $exeName = $pick.Game
 $gameId = ($exeName.ToLower() -replace '[^a-z0-9]+', '-').Trim('-')
 if (-not $gameId) { $gameId = 'stepmania' }
 Write-Host "Game detected: $exeName" -ForegroundColor Green
+
+# ---- The build folder of this source ---------------------------------------
+# One per source, with a fixed name (the source folder's name). The build remembers its commit, so the
+# question "update it?" is asked when the source moved to another commit. Decided now, before compiling,
+# so that "do not update" costs nothing.
+$plan = $null
+if (-not $SyncOnly -and -not $NoPackage) {
+    $plan = Get-BuildPlan -BuilderRoot $Root -SourcePath $Source -SourceName $srcName -Name $Name
+    $what = if ($plan.Commit) { "source at commit $($plan.Commit)" } else { 'source without git information' }
+    Write-Host "Build folder: $($plan.Folder)  ($what)"
+    if ($plan.NeedsUpdate) {
+        $oldName = Split-Path $plan.Existing -Leaf
+        Write-Host "`nThere is already a build of '$srcName': $oldName" -ForegroundColor Yellow
+        if ($plan.Changed) { Write-Host "    It was built from commit $($plan.OldCommit); the source is now at $($plan.Commit)." }
+        if ($plan.Rename)  { Write-Host "    It has the name an older version of the builder used; it will be renamed to $($plan.Folder)." }
+        Write-Host '    Updating it refreshes it; its Save (preferences, profiles, scores) and the files you added are kept.'
+        $go = $UpdateBuild -eq 'yes'
+        if ($UpdateBuild -eq 'ask') {
+            $ans = ''
+            try { $ans = "$(Read-Host '    Update it? [Y/n]')".Trim() } catch { }
+            $go = $ans -notmatch '^(n|no)$'
+        }
+        if (-not $go) {
+            Write-Host "Nothing was built: $oldName was left as it is." -ForegroundColor Yellow
+            exit 2
+        }
+    }
+}
 
 # ---- Toolchain ------------------------------------------------------------
 $tc       = Join-Path $Root 'toolchain'
@@ -571,11 +607,27 @@ if (-not $NoPackage) {
     # Data folders shipped in a clean build (same layout for StepMania and ITGmania)
     $dataDirs  = 'Announcers', 'BackgroundEffects', 'BackgroundTransitions', 'BGAnimations', 'Characters',
                  'Courses', 'Data', 'Docs', 'NoteSkins', 'Scripts', 'Songs', 'Themes'
-    # Named after the source folder + US date + time (24 h): stepmania-11142026-1530, my-fork-11142026-0905...
-    $folder    = if ($Name) { "$srcName-$Name" } else { "$srcName-" + (Get-Date -Format 'MMddyyyy-HHmm') }
-    $outDir    = Join-Path $Root $folder
+    # ONE folder per source, decided before compiling (see "The build folder of this source")
+    $outDir    = $plan.Target
+    if ($plan.Rename) {
+        # a build made by an older version of the builder (old-style name) gets the fixed name; Save etc. kept
+        try { Rename-Item -LiteralPath $plan.Existing -NewName $plan.Folder -ErrorAction Stop }
+        catch { throw "Could not rename $($plan.Existing) to $($plan.Folder): is the game running from it? Close it and build again. ($($_.Exception.Message))" }
+        Write-Host "Renamed the existing build: $(Split-Path $plan.Existing -Leaf) -> $($plan.Folder)"
+    }
+    if ($plan.Changed) { Write-Host "Updating the build from commit $($plan.OldCommit) to $($plan.Commit)" }
     Step "Packaging clean build: $outDir"
     New-Item -ItemType Directory -Force $outDir | Out-Null
+
+    # The build KEEPS what you add to it (themes, noteskins, songs...): files are copied over it, never
+    # mirrored. .builder-files.txt lists what the builder put there, so that when a newer source no longer
+    # has one of THOSE files, only that file is removed. Save, Cache, Logs and Screenshots are never touched.
+    $listFile = Join-Path $outDir '.builder-files.txt'
+    $cmp = [StringComparer]::OrdinalIgnoreCase
+    $oldList = New-Object 'System.Collections.Generic.HashSet[string]' $cmp
+    if (Test-Path -LiteralPath $listFile) { foreach ($l in [IO.File]::ReadAllLines($listFile)) { if ($l) { [void]$oldList.Add($l) } } }
+    $newList = New-Object 'System.Collections.Generic.HashSet[string]' $cmp
+    $stageLen = $stage.TrimEnd('\').Length + 1
 
     $di = 0
     foreach ($d in $dataDirs) {
@@ -586,9 +638,15 @@ if (-not $NoPackage) {
         $skipDirs = @('.git')
         if ($d -eq 'Themes') { $skipDirs += '_Installer' }     # _Installer is only used by the NSIS installer
         # .git directories/files (e.g. the gitlink file of a submodule theme such as Simply Love) are not shipped
-        $rcArgs = @($from, (Join-Path $outDir $d), '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NP', '/MT:16', '/XD') + $skipDirs + @('/XF', '.git')
+        # /E (not /MIR): new and changed files are copied, nothing that is only in the build is deleted
+        $rcArgs = @($from, (Join-Path $outDir $d), '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NP', '/MT:16', '/XD') + $skipDirs + @('/XF', '.git')
         robocopy @rcArgs | Out-Null
         if ($LASTEXITCODE -ge 8) { throw "robocopy failed while copying $d (code $LASTEXITCODE)" }
+        foreach ($f in Get-ChildItem -LiteralPath $from -Recurse -File -Force -ErrorAction SilentlyContinue) {
+            $rel = $f.FullName.Substring($stageLen)
+            if ($rel -match '(^|\\)\.git(\\|$)' -or $rel -match '^Themes\\_Installer(\\|$)') { continue }
+            [void]$newList.Add($rel)
+        }
     }
     # Remove a Themes\_Installer left over from a previous packaging
     $oldInst = Join-Path $outDir 'Themes\_Installer'
@@ -596,12 +654,42 @@ if (-not $NoPackage) {
     Write-Bar 'Packaging' $dataDirs.Count ($dataDirs.Count + 1) 'Program' -Force
 
     # Program\: only the game exe, its .vdi (crash stack traces) and the DLLs. No mapconv.exe, no .map.
+    # (Copied over: anything you put in Program yourself is kept too.)
     $progOut = Join-Path $outDir 'Program'
-    if (Test-Path $progOut) { Remove-Item $progOut -Recurse -Force }
     New-Item -ItemType Directory -Force $progOut | Out-Null
     Get-ChildItem (Join-Path $stage 'Program') -File |
         Where-Object { ($_.Extension -eq '.exe' -and $_.Name -ne 'mapconv.exe') -or $_.Extension -eq '.vdi' -or $_.Extension -eq '.dll' } |
-        ForEach-Object { Copy-Item $_.FullName $progOut -Force }
+        ForEach-Object { Copy-Item $_.FullName $progOut -Force; [void]$newList.Add("Program\$($_.Name)") }
+
+    # Files the builder put here before that the new source no longer has: remove them (only those)
+    $removed = 0
+    foreach ($rel in @($oldList)) {
+        if ($newList.Contains($rel)) { continue }
+        $p = Join-Path $outDir $rel
+        if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue; $removed++ }
+        # and the folders that leaves empty (never the top folders such as Themes)
+        $dir = Split-Path $p -Parent
+        while ((Split-Path $dir -Parent) -ine $outDir -and (Test-Path -LiteralPath $dir) -and
+               -not (Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+            Remove-Item -LiteralPath $dir -Force -ErrorAction SilentlyContinue
+            $dir = Split-Path $dir -Parent
+        }
+    }
+    [IO.File]::WriteAllLines($listFile, [string[]]@($newList))
+    # What the build remembers about itself (shown by the window; tells when the source moved on)
+    [ordered]@{
+        Source = $srcName; Commit = $plan.Commit; Game = $exeName; Config = $Config
+        Built  = (Get-Date).ToString('MM/dd/yyyy HH:mm', [Globalization.CultureInfo]::InvariantCulture)
+    } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outDir '.builder-build.json') -Encoding ascii
+    # what you added yourself (not from the source): kept, just reported
+    $mine = 0
+    foreach ($d in $dataDirs) {
+        $dd = Join-Path $outDir $d
+        if (-not (Test-Path -LiteralPath $dd)) { continue }
+        foreach ($f in Get-ChildItem -LiteralPath $dd -Recurse -File -Force -ErrorAction SilentlyContinue) {
+            if (-not $newList.Contains($f.FullName.Substring($outDir.Length + 1))) { $mine++ }
+        }
+    }
 
     # Portable mode: Save/Cache/Logs live inside the folder (the reference builds ship it empty)
     $ini = Join-Path $outDir 'portable.ini'
@@ -610,6 +698,8 @@ if (-not $NoPackage) {
     $global:LASTEXITCODE = 0
     Write-Bar 'Packaging' ($dataDirs.Count + 1) ($dataDirs.Count + 1) 'done' -Force
     Complete-Bar
+    if ($removed) { Write-Host "    Removed $removed file(s) that the new source no longer has." }
+    if ($mine) { Ok "Kept $mine file(s) you added yourself (themes, noteskins, songs...)." }
 
     # -CopySave: bring your preferences, profiles and scores from the newest previous build of this source
     if ($CopySave) {

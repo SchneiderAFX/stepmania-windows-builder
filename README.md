@@ -24,7 +24,9 @@ A small Windows toolkit to build [StepMania](https://github.com/stepmania/stepma
 3. Press **Download a source...** and pick StepMania, ITGmania or the address of a fork. Each one goes into its own folder inside `source\`. (Already have one? Paste it into its own folder inside `source\` and press **Refresh**.)
 4. Press **Build**. When it finishes, press **Play**.
 
-The result is in a folder named after the source, the date (US format) and the time of the build (24 h): `.\stepmania-MMDDYYYY-HHMM\`, `.\itgmania-MMDDYYYY-HHMM\`, `.\stepmania-fixes-MMDDYYYY-HHMM\`... (e.g. `itgmania-11082026-1530` = November 8, 2026 at 15:30). Its game is `Program\StepMania.exe` or `Program\ITGmania.exe`.
+The result is in a folder with the **same name as the source**, always: `source\stepmania-fixes` -> `.\stepmania-fixes\`, `source\itgmania` -> `.\itgmania\`. Its game is `Program\StepMania.exe` or `Program\ITGmania.exe`.
+
+Each source has **one** build folder. Building again refreshes it and keeps its `Save` (preferences, profiles, scores), `Cache`, `Logs` and `Screenshots`, and **everything you added to it yourself** (themes, noteskins, songs, announcers...). Only the files that come from the source are updated; a file that the source removed in a newer version is removed from the build too, but only if the builder had put it there (the build keeps that list in `.builder-files.txt`). The build **remembers the commit it was made from** (in `.builder-build.json`). When the source moved to another commit (e.g. after **Check updates > Update**), the Builds list marks it **Outdated** and Build asks whether to **update** it: **Yes** refreshes it (same folder name; its Save and your files are kept); **No** builds nothing and leaves it as it is.
 
 To change the game's code: edit the files in its folder inside `.\source` and build again.
 
@@ -53,7 +55,7 @@ The same steps are in `cli\` as `.bat` files, for those who prefer a console or 
 
    **Several sources side by side**: you can keep as many as you want (e.g. `source\stepmania`, `source\itgmania`, `source\stepmania-fixes`). When there is more than one, `cli\3. build.bat` asks which one to build (Enter = the last one you built), or set `SOURCE=<folder name>` in it. If you download a source whose folder already exists, `cli\2. get-source.bat` warns you and lets you **keep it and download the new one with another name** (e.g. `stepmania-2`) or **delete it and download it again** (you must type `YES`; your changes in it would be lost).
 
-3. **Build**: double-click `cli\3. build.bat`. The result is in the same `<source>-MMDDYYYY-HHMM` folder as with the window.
+3. **Build**: double-click `cli\3. build.bat`. The result is in the same `<source>` folder as with the window (it asks the same question before updating it; `UPDATE_BUILD=yes|no` answers it for you).
 
 ### About the download
 
@@ -99,8 +101,8 @@ If the percentage or the spinner keeps moving, the script is working, even when 
 
 - **Toolchain**: its status (Not installed / Installed / Verified on a date), **Install** (or **Repair** once installed) and **Verify**, with the **Defender scan** option.
 - **Download...**: StepMania, ITGmania or the HTTPS address of a fork, into its own folder (you can choose the folder name). If that folder already exists, it asks whether to keep it and download with another name, or delete it and download again (it asks twice before deleting). A source pasted directly in `source\` is moved into its own folder first, after asking. **Open** opens the selected source folder.
-- Build options: **Config** (Release / Debug...), **Name** (a fixed output folder instead of the date and time), **Clean** (rebuild everything; one time) and **Copy Save from the last build** (your preferences, profiles and scores go to the new build).
-- **Builds**: your finished builds, newest first, marked **Latest**, **Older** (a newer build of the same source exists), **Source deleted** and **Has Save**. **Play**, **Open** and **Delete**. Delete always asks first, shows the build's date and size, warns if it is the newest one or has a Save, and moves it to the **Recycle Bin**.
+- Build options: **Config** (Release / Debug...), **Name** (adds a name to the output folder: `<source>-<name>`), **Clean** (rebuild everything; one time) and **Copy Save from the last build** (your preferences, profiles and scores go to the new build).
+- **Builds**: your finished builds with the commit each one was built from, marked **Outdated** (the source is now at a newer commit: press Build to update it), **Older copy** (a build left by an older version of the builder), **Source deleted** and **Has Save**. **Play**, **Open** and **Delete**. Delete always asks first, shows the build's date and size, warns if it is the current build of its source or has a Save, and moves it to the **Recycle Bin**.
 
 **Check updates** (next to the source, in both modes) compares the selected source with the latest commits of its repository on GitHub, **without downloading anything**. A window shows your commit and the latest one (with dates), the list of new commits (message, author, date), how many files they change and where, the submodules they move, and the files you changed yourself. Then you choose **Update** or **Not now** (**View on GitHub** opens the full comparison).
 
@@ -128,7 +130,7 @@ set "RUN=0"
 
 | File | Settings |
 |---|---|
-| `cli\3. build.bat` | `CONFIG`, `NAME`, `SOURCE`, `DOWNLOAD`, `RUN`, `COPY_SAVE`, `CLEAN`, `SYNC_ONLY`, `NO_PACKAGE`, `NO_PORTABLE`, `SKIP_VERIFY`, `DELETE_WORK` (`ask`/`yes`/`no`), `PAUSE_AT_END` |
+| `cli\3. build.bat` | `CONFIG`, `NAME`, `UPDATE_BUILD` (`ask`/`yes`/`no`), `SOURCE`, `DOWNLOAD`, `RUN`, `COPY_SAVE`, `CLEAN`, `SYNC_ONLY`, `NO_PACKAGE`, `NO_PORTABLE`, `SKIP_VERIFY`, `DELETE_WORK` (`ask`/`yes`/`no`), `PAUSE_AT_END` |
 | `cli\2. get-source.bat` | `GAME`, `REPO_URL`, `FOLDER_NAME`, `TARGET`, `FULL_HISTORY`, `USE_MINGIT`, `PAUSE_AT_END` |
 | `cli\1. setup-toolchain.bat` | `DEFENDER` (`ask`/`scan`/`skip`), `FORCE`, `SDK_VERSION`, `MSVC_MINOR`, `TOOLCHAIN_DIR`, `PAUSE_AT_END` |
 | `cli\verify-toolchain.bat` | `DEFENDER` (`ask`/`scan`/`skip`), `TOOLCHAIN_DIR`, `PAUSE_AT_END` |
@@ -155,7 +157,7 @@ builder-folder\
   tools\git\              <- portable git, only if you had none (created by get-source)
   source-backups\         <- copies of the files you changed, made before each Check updates > Update
   _work\                  <- internal: working copy + build cache (you are asked after each build whether to delete it)
-  stepmania-MMDDYYYY-HHMM\ <- the clean builds (output): <source name>-<US date>-<time>
+  stepmania-fixes\        <- the clean builds (output): one per source, same name as the source
   cli\                    <- the same steps for the console (each .bat has a SETTINGS section)
     1. setup-toolchain.bat  <- step 1: downloads and verifies the toolchain (once)
     2. get-source.bat       <- step 2: downloads StepMania, ITGmania or a fork into source\<name>
@@ -180,7 +182,7 @@ The window and the `cli\` files use the same scripts, so you can mix them. Renam
 | `portable.ini` (portable mode: `Save`, `Cache`, `Logs` live inside the folder) | Files in the repo root (`CMakeLists.txt`, `.git*`, `README.md`...) |
 | `Announcers`, `BackgroundEffects`, `BackgroundTransitions`, `BGAnimations`, `Characters`, `Courses`, `Data`, `Docs`, `NoteSkins`, `Scripts`, `Songs`, `Themes` | `mapconv.exe`, `.map` files, `Themes\_Installer`, `.git` files of submodule themes |
 
-Every build gets its own folder (the time is part of the name), so older builds are never overwritten. A build that starts in the same minute as the previous one refreshes that folder. With `-Name` / `NAME=`, the same folder is refreshed on every build and its `Save`, `Cache`, `Logs` and `Screenshots` are kept.
+Each source has one build folder, with the same name as the source folder: building again refreshes it and keeps its `Save`, `Cache`, `Logs` and `Screenshots`, plus anything you added yourself (custom themes, noteskins, songs...). The files that come from the source are copied over the build (never mirrored); `.builder-files.txt` inside the build lists them, so a file the source no longer has is removed only if the builder had put it there. `.builder-build.json` remembers the commit the build was made from: when the source moved to another commit, you are asked whether to update the build. Builds made by older versions of the builder (`<source>-<commit>`, `<source>-MMDDYYYY`, `<source>-MMDDYYYY-HHMM`) are recognized: the newest one is renamed to the fixed name the next time you build (after asking), the others show as **Older copy** in the Builds list and can be deleted. With `-Name` / `NAME=`, the folder is `<source>-<name>` instead.
 
 ITGmania's optional `Texture Font Generator.exe` is not built (it needs MFC, which is not part of the portable toolchain).
 
@@ -193,7 +195,8 @@ These options go after the `.bat` name (`"cli\3. build.bat" -Run`) or after `.\s
 | Option | Description |
 |---|---|
 | `-Config Release\|Debug\|RelWithDebInfo\|MinSizeRel` | Build configuration (default `Release`) |
-| `-Name finished` | Output folder name: `<source name>-finished` (e.g. `stepmania-finished`) instead of the date and time; that folder is refreshed on every build |
+| `-Name finished` | Output folder name: `<source name>-finished` (e.g. `stepmania-finished`) instead of just `<source name>` |
+| `-UpdateBuild ask\|yes\|no` | The source moved to another commit than its build: ask whether to update the build (default; Enter = yes), update it, or build nothing |
 | `-Download stepmania\|itgmania` | If there is no source at all, download that game without asking |
 | `-Run` | Launch the game when done |
 | `-Clean` | Rebuild from scratch (needed once after moving or renaming this folder) |
@@ -263,7 +266,7 @@ Notes:
 | `_work\` | Yes (the builder offers to delete it after each build). It is regenerated; the next build is just slower because it compiles everything |
 | `toolchain\_downloads\` | Yes. Only a download cache |
 | `*.log` | Yes |
-| `<source name>-MMDDYYYY-HHMM\` (e.g. `stepmania-11142026-1530\`) | Yes, but copy its `Save\` first if you played in it (preferences, profiles, scores). Since every build creates a new folder, delete the old ones from time to time |
+| The build folders (e.g. `stepmania-fixes\`) | Yes, but copy its `Save\` first if you played in it (preferences, profiles, scores), and anything you added to it. Builds marked **Older copy** (left by older versions of the builder) can also go |
 
 ## Moving or renaming this folder
 

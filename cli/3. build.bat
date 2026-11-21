@@ -11,12 +11,18 @@ rem ============================================================================
 rem Build configuration: Release | Debug | RelWithDebInfo | MinSizeRel
 set "CONFIG=Release"
 
-rem Name of the output folder: SOURCE-NAME (SOURCE is the name of the source folder,
-rem e.g. stepmania, itgmania or your fork's name).
-rem Leave empty to use the date (US format) and time (24 h) of the build,
-rem e.g. itgmania-11142026-1530. Every build then gets a new folder.
-rem With a NAME, the same folder is refreshed on every build (Save, Cache and Logs are kept).
+rem Name of the output folder. Each source has ONE build folder, always with the same
+rem name as the source folder (e.g. stepmania-fixes), refreshed on every build (Save,
+rem Cache, Logs and the files you added are kept). With a NAME, the folder is
+rem SOURCE-NAME instead (e.g. stepmania-fixes-test).
 set "NAME="
+
+rem The build remembers the commit it was made from. When the source moved to another
+rem commit, update the build?
+rem   ask = ask before building (Enter = yes)
+rem   yes = update it without asking (its Save and the files you added are kept)
+rem   no  = do not update it: nothing is built
+set "UPDATE_BUILD=ask"
 
 rem Which source to build: the name of a folder inside source\ (e.g. itgmania or
 rem stepmania-fixes), or a full path. Leave empty to build the only one there or, when
@@ -77,6 +83,7 @@ echo %* | findstr /i /c:"-Name" >nul && set "NAME="
 echo %* | findstr /i /c:"-Source" >nul && set "SOURCE="
 echo %* | findstr /i /c:"-Download" >nul && set "DOWNLOAD="
 echo %* | findstr /i /c:"-Run" >nul && set "RUN=0"
+echo %* | findstr /i /c:"-UpdateBuild" >nul && set "UPDATE_BUILD="
 echo %* | findstr /i /c:"-CopySave" >nul && set "COPY_SAVE=0"
 echo %* | findstr /i /c:"-Clean" >nul && set "CLEAN=0"
 echo %* | findstr /i /c:"-SyncOnly" >nul && set "SYNC_ONLY=0"
@@ -92,6 +99,7 @@ if defined NAME set ARGS=%ARGS% -Name "%NAME%"
 if defined SOURCE set ARGS=%ARGS% -Source "%SOURCE%"
 if defined DOWNLOAD set ARGS=%ARGS% -Download %DOWNLOAD%
 if "%RUN%"=="1" set ARGS=%ARGS% -Run
+if defined UPDATE_BUILD set ARGS=%ARGS% -UpdateBuild %UPDATE_BUILD%
 if "%COPY_SAVE%"=="1" set ARGS=%ARGS% -CopySave
 if "%CLEAN%"=="1" set ARGS=%ARGS% -Clean
 if "%SYNC_ONLY%"=="1" set ARGS=%ARGS% -SyncOnly

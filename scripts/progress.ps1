@@ -98,6 +98,70 @@ function Find-GitExe {
             Where-Object { Test-Path $_ } | Select-Object -First 1)
 }
 
+function Get-SourceCommit {
+    # Short commit of a source that is a git clone, or '' (pasted copy, ZIP, or no git available)
+    param([string]$BuilderRoot, [string]$SourcePath)
+    if (-not (Test-Path -LiteralPath (Join-Path $SourcePath '.git'))) { return '' }
+    $git = Find-GitExe -BuilderRoot $BuilderRoot
+    if (-not $git) { return '' }
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $c = ((& $git -C $SourcePath rev-parse --short HEAD 2>$null) -join '').Trim()
+    $ErrorActionPreference = $prev
+    $global:LASTEXITCODE = 0
+    if ($c -match '^[0-9a-f]{7,12}$') { return $c } else { return '' }
+}
+
+function Read-BuildInfo {
+    # What a build remembers about itself (.builder-build.json: Source, Commit, Built...), or $null
+    param([string]$BuildPath)
+    $f = Join-Path $BuildPath '.builder-build.json'
+    if (-not (Test-Path -LiteralPath $f)) { return $null }
+    try { return (Get-Content -LiteralPath $f -Raw | ConvertFrom-Json) } catch { return $null }
+}
+
+function Get-BuildPlan {
+    # Where the clean build of a source goes, and whether it must be updated.
+    # Each source has ONE build folder with a FIXED name: the name of the source folder
+    # (source\stepmania-fixes -> stepmania-fixes\), or <source>-<Name> with -Name. The build remembers
+    # its commit in .builder-build.json, so the builder knows when the source moved to another one.
+    #   Existing    = the build of this source (that folder, or a build made by an older version of the
+    #                 builder: <source>-<commit>, <source>-MMDDYYYY or <source>-MMDDYYYY-HHMM)
+    #   Rename      = Existing has an old-style name: it becomes the fixed one
+    #   Changed     = the source is at another commit than the build
+    #   NeedsUpdate = Rename or Changed: ask before building
+    param([string]$BuilderRoot, [string]$SourcePath, [string]$SourceName, [string]$Name = '')
+    $reserved = 'source', 'toolchain', 'tools', 'scripts', '_work', 'cli', 'source-backups'
+    $folder = if ($Name) { "$SourceName-$Name" } elseif ($reserved -contains $SourceName.ToLower()) { "$SourceName-build" } else { $SourceName }
+    $target = Join-Path $BuilderRoot $folder
+    $commit = Get-SourceCommit -BuilderRoot $BuilderRoot -SourcePath $SourcePath
+
+    $existing = $null; $rename = $false
+    if (Test-Path -LiteralPath (Join-Path $target 'portable.ini')) { $existing = $target }
+    elseif (-not $Name) {
+        $re = '^' + [regex]::Escape($SourceName) + '-([0-9a-f]{7,12}|\d{8}(-\d{4})?)$'
+        $old = Get-ChildItem -LiteralPath $BuilderRoot -Directory -ErrorAction SilentlyContinue |
+               Where-Object { $_.Name -match $re -and (Test-Path -LiteralPath (Join-Path $_.FullName 'portable.ini')) } |
+               Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($old) { $existing = $old.FullName; $rename = $true }
+    }
+
+    # the commit the existing build was made from
+    $oldCommit = ''
+    if ($existing) {
+        $info = Read-BuildInfo $existing
+        if ($info -and $info.Commit) { $oldCommit = [string]$info.Commit }
+        elseif ($rename) {
+            $leaf = Split-Path $existing -Leaf
+            if ($leaf -notmatch '-\d{8}(-\d{4})?$' -and $leaf -match '-([0-9a-f]{7,12})$') { $oldCommit = $Matches[1] }
+        }
+    }
+    $changed = [bool]($existing -and $commit -and $oldCommit -and $oldCommit -ne $commit)
+    return [pscustomobject]@{
+        Folder = $folder; Target = $target; Existing = $existing; Commit = $commit; OldCommit = $oldCommit
+        Rename = $rename; Changed = $changed; NeedsUpdate = ($rename -or $changed)
+    }
+}
+
 function Get-MissingSubmodules {
     # Returns the git submodules (paths listed in <Source>\.gitmodules) whose folder is missing or empty.
     # That is what a GitHub "Download ZIP" gives you: ZIP files do not include submodules.

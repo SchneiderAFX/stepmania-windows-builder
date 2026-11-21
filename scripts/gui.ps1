@@ -30,6 +30,7 @@ $iconFile     = Join-Path $scriptsDir 'builder.ico'
 $firstRun     = -not (Test-Path -LiteralPath $settingsFile)
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms, System.Drawing, Microsoft.VisualBasic
+. (Join-Path $scriptsDir 'progress.ps1')      # shared helpers (Get-BuildPlan, Find-GitExe...)
 
 # ---------------------------------------------------------------- background process runner
 # Runs a program without a console window and queues every output line. The window reads the queue
@@ -112,26 +113,44 @@ function Test-HasFiles([string]$dir) {
 
 function Get-Builds {
     # Finished clean builds: folders next to the scripts with portable.ini and Program\<game>.exe
+    # Each build remembers its source and commit (.builder-build.json); builds from older versions of the
+    # builder are recognized by their name (<source>-<commit> / -MMDDYYYY / -MMDDYYYY-HHMM).
     $sources = @(Get-Sources)
     $names = @($sources | ForEach-Object { $_.Name } | Sort-Object Length -Descending)
-    $skip = 'source', 'toolchain', 'tools', 'scripts', '_work'
+    $srcCommit = @{}
+    foreach ($s in $sources) { $srcCommit[$s.Name] = Get-SourceCommit -BuilderRoot $root -SourcePath $s.Path }
+    $skip = 'source', 'toolchain', 'tools', 'scripts', '_work', 'cli', 'source-backups'
     $list = foreach ($d in Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue) {
         if ($skip -contains $d.Name) { continue }
         if (-not (Test-Path -LiteralPath (Join-Path $d.FullName 'portable.ini'))) { continue }
         $exe = Get-ChildItem -LiteralPath (Join-Path $d.FullName 'Program') -Filter '*.exe' -ErrorAction SilentlyContinue |
                Where-Object { $_.Name -ne 'mapconv.exe' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
         if (-not $exe) { continue }
-        $src = $names | Where-Object { $d.Name.StartsWith("$_-", 'OrdinalIgnoreCase') } | Select-Object -First 1
-        $known = [bool]$src
-        if (-not $src) { $src = if ($d.Name -match '^(.+)-\d{8}-\d{4}$') { $Matches[1] } else { $d.Name -replace '-[^-]+$', '' } }
+        $info = Read-BuildInfo $d.FullName
+        $src = $null; $commit = ''; $built = $exe.LastWriteTime
+        if ($info -and $info.Source) { $src = [string]$info.Source; $commit = [string]$info.Commit }
+        else {
+            $src = $names | Where-Object { $d.Name -ieq $_ -or $d.Name.StartsWith("$_-", 'OrdinalIgnoreCase') } | Select-Object -First 1
+            if (-not $src) { $src = if ($d.Name -match '^(.+)-\d{8}(-\d{4})?$') { $Matches[1] } else { $d.Name -replace '-[^-]+$', '' } }
+            if ($d.Name -notmatch '-\d{8}(-\d{4})?$' -and $d.Name -match '-([0-9a-f]{7,12})$') { $commit = $Matches[1] }
+        }
+        if ($info -and $info.Built) {
+            try { $built = [datetime]::ParseExact([string]$info.Built, 'MM/dd/yyyy HH:mm', [Globalization.CultureInfo]::InvariantCulture) } catch { }
+        }
+        $known = $srcCommit.ContainsKey($src)
+        $now = if ($known) { $srcCommit[$src] } else { '' }
         [pscustomobject]@{
-            Name = $d.Name; Path = $d.FullName; Exe = $exe.FullName; Time = $exe.LastWriteTime
+            Name = $d.Name; Path = $d.FullName; Exe = $exe.FullName; Time = $built
             Source = $src; SourceExists = $known; HasSave = (Test-HasFiles (Join-Path $d.FullName 'Save'))
+            Commit = $commit; SourceCommit = $now
+            Outdated = [bool]($known -and $commit -and $now -and $commit -ne $now)
             Latest = $false
         }
     }
     $list = @($list | Sort-Object Time -Descending)
     $seen = @{}
+    # the current build of each source: the one with the fixed name (= source name), or else the newest
+    foreach ($b in $list) { if ($b.Name -ieq $b.Source) { $b.Latest = $true; $seen[$b.Source] = $true } }
     foreach ($b in $list) { if (-not $seen.ContainsKey($b.Source)) { $b.Latest = $true; $seen[$b.Source] = $true } }
     return $list
 }
@@ -181,6 +200,7 @@ $palettes = @{
         Bg = '#F7F7F5'; Card = '#FFFFFF'; CardBorder = '#DCDCD6'; Text = '#1F1F1C'; Muted = '#8A8A84'; Label = '#55554F'
         LogBg = '#FBFBFA'; InputBg = '#FFFFFF'; InputBorder = '#C9C9C2'; BtnBg = '#F3F3F1'; BtnBorder = '#C9C9C2'
         BtnHover = '#E9E9E5'; BtnPressed = '#DDDDD7'; Accent = '#2E8B47'; Track = '#E6E6E1'; Selection = '#DCE8F7'
+        AccentHover = '#26773C'; AccentText = '#FFFFFF'; RowHover = '#F3F3F0'
         BannerBg = '#FFF4DD'; BannerBorder = '#E8C77A'; BannerText = '#6B4A00'
         Ok = '#2E7D32'; Bad = '#C62828'; Warn = '#8A6A00'
         OkBg = '#E3F1E4'; OkFg = '#24602A'; BadBg = '#FCE8E6'; BadFg = '#9B2C22'; InfoBg = '#E8EEF8'; InfoFg = '#284A7A'
@@ -190,6 +210,7 @@ $palettes = @{
         Bg = '#1C1C1A'; Card = '#272725'; CardBorder = '#3A3A37'; Text = '#ECECE8'; Muted = '#9C9C95'; Label = '#BDBDB6'
         LogBg = '#20201E'; InputBg = '#20201E'; InputBorder = '#4A4A46'; BtnBg = '#33332F'; BtnBorder = '#4A4A46'
         BtnHover = '#3D3D39'; BtnPressed = '#474742'; Accent = '#4CB866'; Track = '#3A3A37'; Selection = '#2F4A6B'
+        AccentHover = '#5CC575'; AccentText = '#0E2414'; RowHover = '#2F2F2C'
         BannerBg = '#3A3020'; BannerBorder = '#6B5520'; BannerText = '#F2D58A'
         Ok = '#7FD08A'; Bad = '#F28B82'; Warn = '#E8C56A'
         OkBg = '#233A26'; OkFg = '#8FD497'; BadBg = '#4A2522'; BadFg = '#F5A39B'; InfoBg = '#233249'; InfoFg = '#9DBDF0'
@@ -270,6 +291,49 @@ $resources = @'
           </ControlTemplate>
         </Setter.Value>
       </Setter>
+    </Style>
+    <Style TargetType="Button" x:Key="AccentButton">
+      <Setter Property="Padding" Value="14,5"/>
+      <Setter Property="MinWidth" Value="80"/>
+      <Setter Property="Foreground" Value="{DynamicResource AccentText}"/>
+      <Setter Property="Background" Value="{DynamicResource Accent}"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="5" SnapsToDevicePixels="True">
+              <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="{DynamicResource AccentHover}"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="B" Property="Opacity" Value="0.85"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style TargetType="Button" x:Key="IconButton" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="MinWidth" Value="0"/>
+      <Setter Property="Width" Value="34"/>
+      <Setter Property="Height" Value="30"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+      <Setter Property="FontSize" Value="14"/>
+    </Style>
+    <Style TargetType="TextBlock" x:Key="Glyph">
+      <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="Margin" Value="0,1,7,0"/>
+    </Style>
+    <Style TargetType="Border" x:Key="BuildRow">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="CornerRadius" Value="7"/>
+      <Setter Property="Padding" Value="10,7"/>
+      <Setter Property="Margin" Value="0,0,0,3"/>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource RowHover}"/></Trigger>
+      </Style.Triggers>
     </Style>
     <Style TargetType="CheckBox">
       <Setter Property="Margin" Value="0,0,18,0"/>
@@ -377,12 +441,12 @@ $tips = @{
     Keep     = "_work is the build cache (about 700 MB per source).`n`nKept: the next build only recompiles what you changed (seconds to a minute).`nDeleted: the folder stays tidy, but the next build compiles everything again (a few minutes)."
     Notify   = 'Shows a Windows notification when a task finishes or fails, so you can do something else meanwhile. Click it to open the build folder.'
     Config   = "Release: the normal game. Use this one if you are not sure.`nDebug: much slower, only for finding bugs with a debugger.`nRelWithDebInfo: like Release, plus debugging information.`nMinSizeRel: like Release, optimized for size."
-    Name     = "Empty: every build gets a new folder named after the source, the date and the time (e.g. stepmania-11142026-1530).`n`nWith a name (e.g. test): the folder is always stepmania-test, refreshed on every build, and its Save is kept."
+    Name     = "Empty: the build folder has the same name as the source folder (e.g. stepmania-fixes). Each source has one build folder: building again refreshes it and keeps its Save and the files you added.`n`nWith a name (e.g. test): the folder is stepmania-fixes-test instead."
     Clean    = 'Throws away the build cache of this source and compiles everything from zero. Only needed if something behaves strangely, or once after moving or renaming the builder folder. Takes a few minutes.'
     CopySave = 'Copies the Save folder (preferences, profiles, scores) of your newest previous build of this same source into the new build, so you keep playing with your data. Your old build is not changed.'
     Defender = "Scans the toolchain with Microsoft Defender after installing or verifying it (about 3 minutes).`nSkipping it is less secure: the files are still checked by their hashes and Microsoft signatures, but not scanned for malware."
     Toolchain= 'The compilers used to build the game: Microsoft MSVC, the Windows SDK, CMake and Ninja. They are installed once inside this folder; nothing is installed on Windows.'
-    Builds   = "Your finished builds (folders next to the scripts).`nLatest: the newest build of that source.`nOlder: a newer build of the same source exists; usually safe to delete.`nSource deleted: its source folder no longer exists.`nHas Save: it has preferences, profiles or scores; deleting it deletes them too."
+    Builds   = "Your finished builds (folders next to the scripts), with the commit each one was built from.`nOutdated: the source is now at a newer commit; press Build to update the build.`nOlder copy: a build made by an older version of the builder; usually safe to delete.`nSource deleted: its source folder no longer exists.`nHas Save: it has preferences, profiles or scores; deleting it deletes them too."
     Check    = "Compares the selected source with the latest commits of its repository on GitHub, without downloading anything. You see what changed and decide whether to update.`n`nOnly for sources downloaded with Download... or git (not pasted copies or ZIPs)."
     Theme    = "Light or dark look. Auto follows the app mode chosen in Windows settings."
 }
@@ -489,7 +553,7 @@ $resources
             <TextBlock Style="{StaticResource InfoMark}" ToolTip="$($tips.Name)" Margin="0,0,8,0"/>
           </StackPanel>
           <TextBox x:Name="TxtName" Grid.Column="4" Height="26" VerticalContentAlignment="Center"
-                   ToolTip="Empty = date and time of the build"/>
+                   ToolTip="Empty = the source's commit (or the date the source was added)"/>
           <WrapPanel Grid.Row="1" Grid.ColumnSpan="5" Margin="0,10,0,0">
             <CheckBox x:Name="ChkClean" Content="Clean (rebuild everything)" Margin="0"/>
             <TextBlock Style="{StaticResource InfoMark}" ToolTip="$($tips.Clean)" Margin="0,0,18,0"/>
@@ -511,7 +575,10 @@ $resources
             <ColumnDefinition Width="*"/>
             <ColumnDefinition Width="Auto"/>
           </Grid.ColumnDefinitions>
-          <Button x:Name="BtnBuild" Grid.Column="0" Content="Build" FontWeight="SemiBold" Height="36" FontSize="14"/>
+          <Button x:Name="BtnBuild" Grid.Column="0" Style="{StaticResource AccentButton}" Height="36" FontSize="14"
+                  AutomationProperties.Name="Build">
+            <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE90F;"/><TextBlock Text="Build"/></StackPanel>
+          </Button>
           <Button x:Name="BtnCancel" Grid.Column="1" Content="Stop" Margin="8,0,0,0" Height="36" IsEnabled="False"
                   ToolTip="Stops the running task. Your source is not affected."/>
         </Grid>
@@ -528,8 +595,12 @@ $resources
         <TextBlock x:Name="DetailText" Foreground="{DynamicResource Muted}" FontSize="12" TextTrimming="CharacterEllipsis"/>
 
         <StackPanel x:Name="ResultPanel" Orientation="Horizontal" Margin="0,10,0,0" Visibility="Collapsed">
-          <Button x:Name="BtnPlay" Content="Play" Margin="0,0,8,0"/>
-          <Button x:Name="BtnOpen" Content="Open folder"/>
+          <Button x:Name="BtnPlay" Style="{StaticResource AccentButton}" Margin="0,0,8,0" AutomationProperties.Name="Play">
+            <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE768;"/><TextBlock Text="Play"/></StackPanel>
+          </Button>
+          <Button x:Name="BtnOpen" AutomationProperties.Name="Open folder">
+            <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE838;"/><TextBlock Text="Open folder"/></StackPanel>
+          </Button>
         </StackPanel>
 
         <Expander x:Name="LogExpander" Header="Details (log)" Margin="0,10,0,0">
@@ -740,7 +811,7 @@ function Show-Notification([string]$title, [string]$text, [bool]$ok) {
 function Remove-Build($b) {
     $mb = [math]::Round((Get-ChildItem -LiteralPath $b.Path -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1MB)
     $msg = "Delete this build?`n`n$($b.Name)`nBuilt: $(Format-Date $b.Time -Time)   Size: $mb MB"
-    if (-not $b.Latest) { $msg += "`nA newer build of '$($b.Source)' exists." } else { $msg += "`nThis is the NEWEST build of '$($b.Source)'." }
+    if (-not $b.Latest) { $msg += "`nThis is an older copy: '$($b.Source)' has another, current build." } else { $msg += "`nThis is the CURRENT build of '$($b.Source)' (the next Build creates it again)." }
     if ($b.HasSave) { $msg += "`n`nIts Save folder has data (preferences, profiles, scores). It will be deleted too." }
     $msg += "`n`nIt goes to the Recycle Bin, so you can still restore it from there."
     if ((Show-Message $msg 'Warning' 'YesNo') -ne 'Yes') { return }
@@ -777,21 +848,50 @@ function Update-Builds {
         [void]$ui.BuildsList.Children.Add($t)
         return
     }
+    $iconFont = New-Object System.Windows.Media.FontFamily 'Segoe Fluent Icons, Segoe MDL2 Assets'
     foreach ($b in $builds) {
+        $card = New-Object System.Windows.Controls.Border
+        $card.Style = $window.FindResource('BuildRow')
         $row = New-Object System.Windows.Controls.DockPanel
-        $row.Margin = '0,0,0,6'
+        $card.Child = $row
         $btns = New-Object System.Windows.Controls.StackPanel
         $btns.Orientation = 'Horizontal'
+        $btns.VerticalAlignment = 'Center'
         [System.Windows.Controls.DockPanel]::SetDock($btns, 'Right')
-        foreach ($act in 'Play', 'Open', 'Delete') {
+
+        # Play: the main action (accent color, icon + text)
+        $play = New-Object System.Windows.Controls.Button
+        $play.Style = $window.FindResource('AccentButton')
+        $play.MinWidth = 0; $play.Height = 30; $play.Padding = '12,0'; $play.Tag = $b
+        $pc = New-Object System.Windows.Controls.StackPanel
+        $pc.Orientation = 'Horizontal'
+        $g = New-Object System.Windows.Controls.TextBlock
+        $g.Text = [string][char]0xE768; $g.FontFamily = $iconFont; $g.VerticalAlignment = 'Center'; $g.Margin = '0,1,7,0'
+        $tx = New-Object System.Windows.Controls.TextBlock
+        $tx.Text = 'Play'
+        [void]$pc.Children.Add($g); [void]$pc.Children.Add($tx)
+        $play.Content = $pc
+        $play.ToolTip = "Start $([IO.Path]::GetFileName($b.Exe))"
+        [System.Windows.Automation.AutomationProperties]::SetName($play, 'Play')
+        $play.add_Click({ param($s) $x = $s.Tag; Start-Process -FilePath $x.Exe -WorkingDirectory $x.Path })
+        [void]$btns.Children.Add($play)
+
+        # Open folder / Delete: icon-only buttons
+        foreach ($act in 'Open', 'Delete') {
             $btn = New-Object System.Windows.Controls.Button
-            $btn.Content = $act; $btn.MinWidth = 0; $btn.Padding = '10,2'; $btn.Margin = '6,0,0,0'; $btn.Tag = $b
-            if ($act -eq 'Delete') { $btn.Foreground = Get-PalBrush 'BadFg' }
-            switch ($act) {
-                'Play'   { $btn.add_Click({ param($s) $x = $s.Tag; Start-Process -FilePath $x.Exe -WorkingDirectory $x.Path }) }
-                'Open'   { $btn.add_Click({ param($s) Start-Process explorer.exe -ArgumentList "`"$($s.Tag.Path)`"" }) }
-                'Delete' { $btn.add_Click({ param($s) Remove-Build $s.Tag }) }
+            $btn.Style = $window.FindResource('IconButton')
+            $btn.Margin = '6,0,0,0'; $btn.Tag = $b
+            if ($act -eq 'Open') {
+                $btn.Content = [string][char]0xE838
+                $btn.ToolTip = 'Open the folder'
+                $btn.add_Click({ param($s) Start-Process explorer.exe -ArgumentList "`"$($s.Tag.Path)`"" })
+            } else {
+                $btn.Content = [string][char]0xE74D
+                $btn.Foreground = Get-PalBrush 'BadFg'
+                $btn.ToolTip = 'Delete this build (it goes to the Recycle Bin; you are asked first)'
+                $btn.add_Click({ param($s) Remove-Build $s.Tag })
             }
+            [System.Windows.Automation.AutomationProperties]::SetName($btn, $(if ($act -eq 'Open') { 'Open' } else { 'Delete' }))
             [void]$btns.Children.Add($btn)
         }
         [void]$row.Children.Add($btns)
@@ -802,17 +902,26 @@ function Update-Builds {
         $name = New-Object System.Windows.Controls.TextBlock
         $name.Text = $b.Name; $name.FontWeight = 'SemiBold'
         [void]$line1.Children.Add($name)
-        if ($b.Latest) { [void]$line1.Children.Add((New-Tag 'Latest' 'Ok')) }
-        else { [void]$line1.Children.Add((New-Tag 'Older' 'Neutral')) }
+        if (-not $b.Latest) { [void]$line1.Children.Add((New-Tag 'Older copy' 'Neutral')) }
+        if ($b.Outdated) {
+            $t = New-Tag 'Outdated' 'Warn'
+            $t.ToolTip = "Built from commit $($b.Commit); the source is now at $($b.SourceCommit). Select the source and press Build to update it."
+            [void]$line1.Children.Add($t)
+        }
         if (-not $b.SourceExists) { [void]$line1.Children.Add((New-Tag 'Source deleted' 'Bad')) }
         if ($b.HasSave) { [void]$line1.Children.Add((New-Tag 'Has Save' 'Info')) }
         $line2 = New-Object System.Windows.Controls.TextBlock
-        $line2.Text = '{0}   {1}' -f (Format-Date $b.Time -Time), $b.Source
+        $parts = @()
+        $parts += if ($b.Commit) { "commit $($b.Commit)" } else { 'no git information' }
+        $parts += "built $(Format-Date $b.Time -Time)"
+        if ($b.Name -ine $b.Source) { $parts += "source: $($b.Source)" }
+        $line2.Text = $parts -join '   '
         $line2.Foreground = Get-PalBrush 'Muted'; $line2.FontSize = 12
         [void]$info.Children.Add($line1)
         [void]$info.Children.Add($line2)
+        $info.VerticalAlignment = 'Center'
         [void]$row.Children.Add($info)
-        [void]$ui.BuildsList.Children.Add($row)
+        [void]$ui.BuildsList.Children.Add($card)
     }
 }
 
@@ -1175,9 +1284,27 @@ function Start-Build {
         return
     }
     $state.SourceName = $src.Name
+
+    # One build folder per source: if the source moved to another commit, ask before updating its build
+    $useName = if ($ui.ChkAdvanced.IsChecked) { $name } else { '' }
+    $plan = Get-BuildPlan -BuilderRoot $root -SourcePath $src.Path -SourceName $src.Name -Name $useName
+    if ($plan.NeedsUpdate) {
+        $old = Get-Item -LiteralPath $plan.Existing
+        $info = Read-BuildInfo $plan.Existing
+        $built = if ($info -and $info.Built) { $info.Built } else { Format-Date $old.LastWriteTime -Time }
+        $lines = @("There is already a build of '$($src.Name)': $($old.Name)   (built $built)", '')
+        if ($plan.Changed) { $lines += "It was built from commit $($plan.OldCommit); the source is now at commit $($plan.Commit)." }
+        if ($plan.Rename)  { $lines += "It has the name an older version of the builder used; it will be renamed to '$($plan.Folder)'." }
+        $lines += '', 'Update that build?', '',
+                  'Yes: it is refreshed. Its Save (preferences, profiles, scores) and the files you added (themes, noteskins, songs...) are kept.',
+                  'No: nothing is built and the build stays as it is.'
+        if ((Show-Message ($lines -join "`n") 'Question' 'YesNo') -ne 'Yes') { Set-Status 'Build cancelled' 'Warn'; $ui.DetailText.Text = "$($old.Name) was left as it is."; return }
+    }
+
     $a = @()
     if ($src.Path -ine $sourceRoot) { $a += @('-Source', ('"{0}"' -f $src.Path)) }    # a single source pasted in source\ needs no -Source
     $a += @('-DeleteWork', $(if ($ui.ChkKeep.IsChecked) { 'no' } else { 'yes' }))
+    $a += @('-UpdateBuild', 'yes')         # already asked above
     if ($ui.ChkAdvanced.IsChecked) {
         $a += @('-Config', $ui.CmbConfig.Text)
         if ($name) { $a += @('-Name', $name) }
@@ -1352,14 +1479,15 @@ $resources
         <TextBlock Style="{StaticResource H}" Text="How to use it" Margin="0,4,0,6"/>
         <TextBlock Style="{StaticResource P}">1. <Bold>Toolchain</Bold> (once): the first time, the builder offers to install it (or press Install toolchain in the yellow note). It downloads the compilers (about 600 MB) into this folder and checks every file. Nothing is installed on Windows. To check it again later, turn on Advanced and press Verify.</TextBlock>
         <TextBlock Style="{StaticResource P}">2. <Bold>Source</Bold>: press Download a source... (or choose + Download another source... at the end of the Source list) and pick StepMania, ITGmania or the address of a fork. Each source goes into its own folder inside source\. You can also paste a source there yourself and press Refresh.</TextBlock>
-        <TextBlock Style="{StaticResource P}">3. <Bold>Build</Bold>: pick the source and press Build. The finished game appears in a new folder next to the scripts, named after the source, the date and the time (e.g. stepmania-11142026-1530). Press Play to start it.</TextBlock>
+        <TextBlock Style="{StaticResource P}">3. <Bold>Build</Bold>: pick the source and press Build. The finished game appears in a folder next to the scripts with the same name as the source (e.g. stepmania-fixes). Press Play to start it.</TextBlock>
+        <TextBlock Style="{StaticResource P}">Each source has <Bold>one</Bold> build folder. Building again refreshes it and keeps its Save (preferences, profiles, scores) and everything you added yourself (custom themes, noteskins, songs...): only the files that come from the source are updated. The build remembers the commit it was made from: after the source is updated to another commit, the Builds list marks it Outdated and Build asks whether to update it.</TextBlock>
         <TextBlock Style="{StaticResource P}">To change the game's code, edit the files in its folder inside source\ (press Open) and build again. The builder never modifies your source.</TextBlock>
 
         <TextBlock Style="{StaticResource H}" Text="Options"/>
         <TextBlock Style="{StaticResource P}"><Bold>Keep _work</Bold>: keeps the build cache, so the next build only recompiles what you changed. Without it, every build compiles everything again (a few minutes).</TextBlock>
         <TextBlock Style="{StaticResource P}"><Bold>Notify me when done</Bold>: a Windows notification when a task finishes or fails.</TextBlock>
         <TextBlock Style="{StaticResource P}"><Bold>Config</Bold> (Advanced): Release is the normal game. Debug is much slower and only useful with a debugger.</TextBlock>
-        <TextBlock Style="{StaticResource P}"><Bold>Name</Bold> (Advanced): empty = a new folder for every build. With a name, the same folder is reused and its Save is kept.</TextBlock>
+        <TextBlock Style="{StaticResource P}"><Bold>Name</Bold> (Advanced): empty = the build folder has the same name as the source. With a name, it is source-name instead.</TextBlock>
         <TextBlock Style="{StaticResource P}"><Bold>Clean</Bold> (Advanced): throws away the build cache and compiles everything from zero. Only when something behaves strangely, or after moving the builder folder.</TextBlock>
         <TextBlock Style="{StaticResource P}"><Bold>Copy Save from the last build</Bold> (Advanced): copies preferences, profiles and scores from your newest previous build of the same source into the new one.</TextBlock>
         <TextBlock Style="{StaticResource P}"><Bold>Defender scan</Bold> (Advanced): scans the toolchain with Microsoft Defender after Install or Verify. Skipping it is less secure.</TextBlock>
@@ -1373,7 +1501,7 @@ $resources
         <TextBlock Style="{StaticResource P}">Auto follows the app mode chosen in Windows settings (light or dark). Light and Dark force one of them.</TextBlock>
 
         <TextBlock Style="{StaticResource H}" Text="Builds list (Advanced)"/>
-        <TextBlock Style="{StaticResource P}"><Bold>Latest</Bold>: the newest build of that source. <Bold>Older</Bold>: a newer one exists, usually safe to delete. <Bold>Source deleted</Bold>: its source folder is gone. <Bold>Has Save</Bold>: it has your preferences, profiles or scores.</TextBlock>
+        <TextBlock Style="{StaticResource P}">Each build shows the commit it was built from. <Bold>Outdated</Bold>: the source is now at a newer commit (press Build to update it). <Bold>Older copy</Bold>: a build made by an older version of the builder, usually safe to delete. <Bold>Source deleted</Bold>: its source folder is gone. <Bold>Has Save</Bold>: it has your preferences, profiles or scores.</TextBlock>
         <TextBlock Style="{StaticResource P}">Delete always asks first, tells you what you would lose, and moves the folder to the Recycle Bin.</TextBlock>
 
         <TextBlock Style="{StaticResource H}" Text="If something fails"/>
