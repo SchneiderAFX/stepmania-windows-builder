@@ -1,4 +1,4 @@
-# StepMania / ITGmania Builder
+# StepMania Windows Builder
 
 A small Windows toolkit to build [StepMania](https://github.com/stepmania/stepmania) or [ITGmania](https://github.com/itgmania/itgmania) from source and get a **clean, ready-to-play build folder**, without touching your original source and without installing Visual Studio or git.
 
