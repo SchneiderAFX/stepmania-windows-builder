@@ -1,6 +1,6 @@
 # StepMania Windows Builder
 
-A small Windows toolkit to build [StepMania](https://github.com/stepmania/stepmania) or [ITGmania](https://github.com/itgmania/itgmania) from source and get a **clean, ready-to-play build folder**, without touching your original source and without installing Visual Studio or git.
+A small Windows toolkit to build [StepMania](https://github.com/stepmania/stepmania), [ITGmania](https://github.com/itgmania/itgmania) or any StepMania Fork (except OutFox lol) from source and get a **clean, ready-to-play build folder**, without touching your original source and without installing Visual Studio or git.
 
 - **A window for everything** (`StepMania Builder.bat`): it guides you the first time (toolchain, then a source), builds with a progress bar, checks for updates, and has light and dark themes. The same steps are also available as `.bat` files in `cli\` for the console.
 - **Foolproof**: no source yet? The builder downloads StepMania, ITGmania or a fork for you.
