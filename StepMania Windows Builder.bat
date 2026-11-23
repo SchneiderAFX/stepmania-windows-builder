@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================================
-rem  Opens StepMania Builder (the window). This is all most people need.
+rem  Opens StepMania Windows Builder (the window). This is all most people need.
 rem
 rem  The first time, it offers to install the toolchain; then download a source
 rem  and press Build. Help (inside the window) explains every option, and can put

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  StepMania Builder - graphical interface.
+  StepMania Windows Builder - graphical interface.
 
 .DESCRIPTION
   A window on top of the same scripts the .bat files use. It runs them in the background with the
@@ -14,7 +14,7 @@
   Compact mode shows only what you need to build; Advanced shows everything else.
   Nothing new is installed: it uses WPF, which is part of Windows.
 
-  Start it with "StepMania Builder.bat" (or: powershell -STA -File scripts\gui.ps1).
+  Start it with "StepMania Windows Builder.bat" (or: powershell -STA -File scripts\gui.ps1).
 #>
 [CmdletBinding()]
 param()
@@ -199,8 +199,10 @@ $palettes = @{
     light = @{
         Bg = '#F7F7F5'; Card = '#FFFFFF'; CardBorder = '#DCDCD6'; Text = '#1F1F1C'; Muted = '#8A8A84'; Label = '#55554F'
         LogBg = '#FBFBFA'; InputBg = '#FFFFFF'; InputBorder = '#C9C9C2'; BtnBg = '#F3F3F1'; BtnBorder = '#C9C9C2'
-        BtnHover = '#E9E9E5'; BtnPressed = '#DDDDD7'; Accent = '#2E8B47'; Track = '#E6E6E1'; Selection = '#DCE8F7'
-        AccentHover = '#26773C'; AccentText = '#FFFFFF'; RowHover = '#F3F3F0'
+        BtnHover = '#E9E9E5'; BtnPressed = '#DDDDD7'; Accent = '#E2512A'; Track = '#E6E6E1'; Selection = '#FBE4DA'
+        AccentHover = '#C93E17'; AccentText = '#FFFFFF'; RowHover = '#F3F3F0'
+        # the icon's orange-red arrow: gradient of the main buttons (top -> bottom) and their outline
+        AccentTop = '#F58552'; AccentBottom = '#D23A16'; AccentTopHover = '#F79766'; AccentBottomHover = '#DD4A22'; AccentBorder = '#A8300F'
         BannerBg = '#FFF4DD'; BannerBorder = '#E8C77A'; BannerText = '#6B4A00'
         Ok = '#2E7D32'; Bad = '#C62828'; Warn = '#8A6A00'
         OkBg = '#E3F1E4'; OkFg = '#24602A'; BadBg = '#FCE8E6'; BadFg = '#9B2C22'; InfoBg = '#E8EEF8'; InfoFg = '#284A7A'
@@ -209,8 +211,9 @@ $palettes = @{
     dark = @{
         Bg = '#1C1C1A'; Card = '#272725'; CardBorder = '#3A3A37'; Text = '#ECECE8'; Muted = '#9C9C95'; Label = '#BDBDB6'
         LogBg = '#20201E'; InputBg = '#20201E'; InputBorder = '#4A4A46'; BtnBg = '#33332F'; BtnBorder = '#4A4A46'
-        BtnHover = '#3D3D39'; BtnPressed = '#474742'; Accent = '#4CB866'; Track = '#3A3A37'; Selection = '#2F4A6B'
-        AccentHover = '#5CC575'; AccentText = '#0E2414'; RowHover = '#2F2F2C'
+        BtnHover = '#3D3D39'; BtnPressed = '#474742'; Accent = '#F0643A'; Track = '#3A3A37'; Selection = '#5A2E1F'
+        AccentHover = '#F47A4F'; AccentText = '#FFFFFF'; RowHover = '#2F2F2C'
+        AccentTop = '#F7915F'; AccentBottom = '#D9441E'; AccentTopHover = '#F9A274'; AccentBottomHover = '#E4532A'; AccentBorder = '#1A1A1C'
         BannerBg = '#3A3020'; BannerBorder = '#6B5520'; BannerText = '#F2D58A'
         Ok = '#7FD08A'; Bad = '#F28B82'; Warn = '#E8C56A'
         OkBg = '#233A26'; OkFg = '#8FD497'; BadBg = '#4A2522'; BadFg = '#F5A39B'; InfoBg = '#233249'; InfoFg = '#9DBDF0'
@@ -248,6 +251,15 @@ public static class SmbDwm {
 function Set-WindowTheme($w) {
     # Puts the current palette into a window's resources and colors its title bar
     foreach ($k in $script:pal.Keys) { $w.Resources[$k] = Get-Brush $script:pal[$k] }
+    # vertical gradients for the main buttons, like the arrow of the icon
+    # (created with ::new and stored as the bare .NET object: a PowerShell-wrapped value would not be a Brush for WPF)
+    $cc = [Windows.Media.ColorConverter]
+    foreach ($pair in @(@('AccentFill', 'AccentTop', 'AccentBottom'), @('AccentFillHover', 'AccentTopHover', 'AccentBottomHover'))) {
+        $c1 = [Windows.Media.Color]$cc::ConvertFromString($script:pal[$pair[1]])
+        $c2 = [Windows.Media.Color]$cc::ConvertFromString($script:pal[$pair[2]])
+        $brush = [System.Windows.Media.LinearGradientBrush]::new($c1, $c2, 90.0)
+        $w.Resources[$pair[0]] = $brush.psobject.BaseObject
+    }
     try {
         $h = (New-Object System.Windows.Interop.WindowInteropHelper $w).EnsureHandle()
         [SmbDwm]::SetDark($h, $script:themeName -eq 'dark')
@@ -296,16 +308,19 @@ $resources = @'
       <Setter Property="Padding" Value="14,5"/>
       <Setter Property="MinWidth" Value="80"/>
       <Setter Property="Foreground" Value="{DynamicResource AccentText}"/>
-      <Setter Property="Background" Value="{DynamicResource Accent}"/>
+      <Setter Property="Background" Value="{DynamicResource AccentFill}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBorder}"/>
+      <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="5" SnapsToDevicePixels="True">
+            <Border x:Name="B" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" SnapsToDevicePixels="True">
               <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
             </Border>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="{DynamicResource AccentHover}"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="{DynamicResource AccentFillHover}"/></Trigger>
               <Trigger Property="IsPressed" Value="True"><Setter TargetName="B" Property="Opacity" Value="0.85"/></Trigger>
               <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
             </ControlTemplate.Triggers>
@@ -456,7 +471,7 @@ foreach ($k in @($tips.Keys)) { $tips[$k] = [Security.SecurityElement]::Escape($
 [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="StepMania Builder" Width="700" SizeToContent="Height" MinWidth="560"
+        Title="StepMania Windows Builder" Width="700" SizeToContent="Height" MinWidth="560"
         WindowStartupLocation="CenterScreen" ResizeMode="CanResizeWithGrip"
         FontFamily="Segoe UI" FontSize="13" Background="{DynamicResource Bg}" Foreground="{DynamicResource Text}">
   <Window.Resources>
@@ -465,7 +480,7 @@ $resources
 
   <StackPanel Margin="16">
     <DockPanel Margin="0,0,0,12">
-      <TextBlock Text="StepMania Builder" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
+      <TextBlock Text="StepMania Windows Builder" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
       <Button x:Name="BtnHelp" DockPanel.Dock="Right" Content="Help" MinWidth="0" Margin="10,0,0,0"
               ToolTip="How to use the builder, and what every option does."/>
       <CheckBox x:Name="ChkAdvanced" DockPanel.Dock="Right" Content="Advanced" Margin="12,0,0,0" VerticalAlignment="Center"
@@ -694,7 +709,7 @@ function Set-Theme {
 }
 
 function Show-Message([string]$text, [string]$icon = 'Information', [string]$buttons = 'OK') {
-    return [string][System.Windows.MessageBox]::Show($window, $text, 'StepMania Builder', $buttons, $icon)
+    return [string][System.Windows.MessageBox]::Show($window, $text, 'StepMania Windows Builder', $buttons, $icon)
 }
 
 function Update-AdvancedView {
@@ -795,7 +810,7 @@ function Show-Notification([string]$title, [string]$text, [bool]$ok) {
         if ($state.Notify) { $state.Notify.Dispose() }
         $ni = New-Object System.Windows.Forms.NotifyIcon
         $ni.Icon = $(try { New-Object System.Drawing.Icon $iconFile, 32, 32 } catch { [System.Drawing.SystemIcons]::Application })
-        $ni.Text = 'StepMania Builder'
+        $ni.Text = 'StepMania Windows Builder'
         $ni.Visible = $true
         $ni.add_BalloonTipClicked({
             if ($state.OutDir -and (Test-Path -LiteralPath $state.OutDir)) { Start-Process explorer.exe -ArgumentList "`"$($state.OutDir)`"" }
@@ -1458,7 +1473,7 @@ function Show-Help {
     $hx = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="StepMania Builder - Help" Width="620" Height="640" WindowStartupLocation="CenterOwner"
+        Title="StepMania Windows Builder - Help" Width="620" Height="640" WindowStartupLocation="CenterOwner"
         FontFamily="Segoe UI" FontSize="13" Background="{DynamicResource Bg}" Foreground="{DynamicResource Text}">
   <Window.Resources>
 $resources
@@ -1468,7 +1483,7 @@ $resources
   <DockPanel>
     <DockPanel DockPanel.Dock="Bottom" Margin="16,8,16,14">
       <Button x:Name="BtnShortcut" Content="Create desktop shortcut" DockPanel.Dock="Left"
-              ToolTip="Puts a 'StepMania Builder' icon on your desktop that opens this window. Create it again if you move this folder."/>
+              ToolTip="Puts a 'StepMania Windows Builder' icon on your desktop that opens this window. Create it again if you move this folder."/>
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
         <Button x:Name="BtnReadme" Content="Open the full README" Margin="0,0,8,0"/>
         <Button x:Name="BtnClose" Content="Close" IsCancel="True"/>
@@ -1525,21 +1540,43 @@ $resources
     [void]$script:helpWin.ShowDialog()
 }
 
+if (-not ('SmbShell' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class SmbShell {
+    [DllImport("shell32.dll")] static extern void SHChangeNotify(int eventId, uint flags, IntPtr item1, IntPtr item2);
+    // Tells Explorer that icons changed, so a shortcut shows the current builder.ico (not a cached old one)
+    public static void RefreshIcons() { SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero); }
+}
+'@
+}
+
+function New-BuilderShortcut([string]$LnkPath) {
+    # A normal Windows shortcut (made on this PC, so nothing to unblock) that opens this window, with the
+    # builder's icon. An existing one is replaced, so it never keeps an older icon or folder.
+    if (Test-Path -LiteralPath $LnkPath) { Remove-Item -LiteralPath $LnkPath -Force }
+    $sh = New-Object -ComObject WScript.Shell
+    $lnk = $sh.CreateShortcut($LnkPath)
+    $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$(Join-Path $scriptsDir 'gui.ps1')`""
+    $lnk.WorkingDirectory = $root
+    $lnk.WindowStyle = 7                    # start minimized: no console flash
+    if (Test-Path -LiteralPath $iconFile) { $lnk.IconLocation = "$iconFile,0" }
+    $lnk.Description = 'Build StepMania / ITGmania from source'
+    $lnk.Save()
+    try { [SmbShell]::RefreshIcons() } catch { }
+}
+
 function New-DesktopShortcut {
-    # A normal Windows shortcut (made on this PC, so nothing to unblock) with the builder's icon
     try {
         $desktop = [Environment]::GetFolderPath('Desktop')
-        $lnkPath = Join-Path $desktop 'StepMania Builder.lnk'
-        $sh = New-Object -ComObject WScript.Shell
-        $lnk = $sh.CreateShortcut($lnkPath)
-        $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$(Join-Path $scriptsDir 'gui.ps1')`""
-        $lnk.WorkingDirectory = $root
-        $lnk.WindowStyle = 7                    # start minimized: no console flash
-        if (Test-Path -LiteralPath $iconFile) { $lnk.IconLocation = "$iconFile,0" }
-        $lnk.Description = 'Build StepMania / ITGmania from source'
-        $lnk.Save()
-        [void](Show-Message "Shortcut created on your desktop:`n$lnkPath`n`nIf you move or rename this folder, create it again." 'Information')
+        $lnkPath = Join-Path $desktop 'StepMania Windows Builder.lnk'
+        # the shortcut made by older versions had another name: replace it instead of leaving two
+        $oldLnk = Join-Path $desktop 'StepMania Builder.lnk'
+        if (Test-Path -LiteralPath $oldLnk) { Remove-Item -LiteralPath $oldLnk -Force -ErrorAction SilentlyContinue }
+        New-BuilderShortcut $lnkPath
+        [void](Show-Message "Shortcut created on your desktop, with the builder's icon:`n$lnkPath`n`nIf you move or rename this folder, create it again." 'Information')
     } catch {
         [void](Show-Message "Could not create the shortcut: $($_.Exception.Message)" 'Warning')
     }
@@ -1606,7 +1643,7 @@ $window.add_ContentRendered({
     if ($script:welcomeDone) { return }
     $script:welcomeDone = $true
     if ($firstRun -and -not (Test-Toolchain) -and -not $state.Task) {
-        $msg = "Welcome to StepMania Builder!`n`n" +
+        $msg = "Welcome to StepMania Windows Builder!`n`n" +
                "Before the first build, the builder needs its toolchain: the compilers that turn the source code into the game (Microsoft MSVC, the Windows SDK, CMake and Ninja).`n`n" +
                "- It is downloaded once into this folder: about 600 MB, a few minutes (plus about 3 minutes of Microsoft Defender scan).`n" +
                "- Every file is checked (SHA-256 hashes and Microsoft signatures).`n" +

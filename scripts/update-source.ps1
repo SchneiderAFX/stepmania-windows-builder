@@ -211,7 +211,7 @@ function Invoke-Git {
     # runs git in the source; returns its exit code (git prints progress on stderr: not an error)
     # Its output is shown, never returned: the function must return ONLY the exit code.
     $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    & $git -C $Source -c core.longpaths=true -c user.name=StepManiaBuilder -c user.email=builder@localhost @args 2>&1 |
+    & $git -C $Source -c core.longpaths=true -c user.name=StepManiaWindowsBuilder -c user.email=builder@localhost @args 2>&1 |
         ForEach-Object { Write-Host "    $_" }
     $code = $LASTEXITCODE
     $ErrorActionPreference = $prev
@@ -246,7 +246,7 @@ if ((Invoke-Git fetch --depth=1 --progress origin $c.Branch) -ne 0) { Stop-With 
 Step 'Applying the update'
 $stashed = $false
 if ($changed.Count) {
-    if ((Invoke-Git stash push -m "StepMania Builder: before updating to $($c.RemoteSha.Substring(0,7))") -ne 0) { Stop-With 'error' "Could not put your changes aside. Nothing was changed; your files are also in $backup" 1 }
+    if ((Invoke-Git stash push -m "StepMania Windows Builder: before updating to $($c.RemoteSha.Substring(0,7))") -ne 0) { Stop-With 'error' "Could not put your changes aside. Nothing was changed; your files are also in $backup" 1 }
     $stashed = $true
 }
 if ((Invoke-Git reset --hard FETCH_HEAD) -ne 0) {
