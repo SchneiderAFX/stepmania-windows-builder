@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://i.imgur.com/9Ddbc8h.png" alt="StepMania Windows Builder" width="366">
+</p>
+
 # StepMania Windows Builder
 
 A small Windows toolkit to build [StepMania](https://github.com/stepmania/stepmania), [ITGmania](https://github.com/itgmania/itgmania) or any StepMania Fork (except OutFox lol) from source and get a **clean, ready-to-play build folder**, without touching your original source and without installing Visual Studio or git.
