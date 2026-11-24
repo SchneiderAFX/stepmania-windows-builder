@@ -10,6 +10,7 @@
     - setup-toolchain.ps1  (Toolchain: Install / Repair)
     - verify-toolchain.ps1 (Toolchain: Verify)
     - update-source.ps1    (Check updates / Update)
+    - update-app.ps1       (updates of the builder itself: checked at start, and from Help)
   Light and dark themes (Auto follows Windows).
   Compact mode shows only what you need to build; Advanced shows everything else.
   Nothing new is installed: it uses WPF, which is part of Windows.
@@ -157,7 +158,7 @@ function Get-Builds {
 
 function Read-Settings {
     $s = @{ Launch = $false; KeepWork = $true; Notify = $true; ShowLog = $false; Advanced = $false
-            CopySave = $false; Defender = $true; Config = 'Release'; VerifiedAt = ''; Theme = 'auto' }
+            CopySave = $false; Defender = $false; Config = 'Release'; VerifiedAt = ''; Theme = 'auto'; AutoUpdate = $true }
     try {
         if (Test-Path -LiteralPath $settingsFile) {
             $j = Get-Content -LiteralPath $settingsFile -Raw | ConvertFrom-Json
@@ -182,6 +183,7 @@ function Save-Settings {
             Config     = [string]$ui.CmbConfig.Text
             VerifiedAt = [string]$state.VerifiedAt
             Theme      = $(if ($ui.CmbTheme.SelectedItem) { [string]$ui.CmbTheme.SelectedItem.Tag } else { 'auto' })
+            AutoUpdate = [bool]$settings.AutoUpdate
         } | ConvertTo-Json | Set-Content -LiteralPath $settingsFile -Encoding ascii
     } catch { }
 }
@@ -495,6 +497,20 @@ $resources
                  VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
     </DockPanel>
 
+    <Border x:Name="AppUpdateBar" Visibility="Collapsed" Background="{DynamicResource Card}" BorderBrush="{DynamicResource Accent}"
+            BorderThickness="1" CornerRadius="8" Padding="12,6" Margin="0,0,0,10">
+      <DockPanel>
+        <Button x:Name="BtnAppUpdateHide" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Content="&#xE711;" Margin="6,0,0,0"
+                ToolTip="Hide until the next start" AutomationProperties.Name="Hide"/>
+        <Button x:Name="BtnAppUpdate" DockPanel.Dock="Right" Style="{StaticResource AccentButton}" Margin="10,0,0,0" AutomationProperties.Name="Update"
+                ToolTip="Downloads the new version of the builder and restarts it. Your toolchain, sources, builds and settings are not touched.">
+          <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE896;"/><TextBlock Text="Update"/></StackPanel>
+        </Button>
+        <TextBlock Style="{StaticResource Glyph}" Text="&#xE895;" FontSize="16" Foreground="{DynamicResource Accent}"/>
+        <TextBlock x:Name="AppUpdateText" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+      </DockPanel>
+    </Border>
+
     <Border x:Name="Banner" Visibility="Collapsed" Background="{DynamicResource BannerBg}" BorderBrush="{DynamicResource BannerBorder}"
             BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,10">
       <StackPanel>
@@ -651,7 +667,7 @@ foreach ($n in 'RootText', 'Banner', 'BannerText', 'BtnBannerInstall', 'BtnBanne
                'TcPill', 'TcText', 'CmbSource', 'BtnRefresh', 'BtnCheck', 'BtnDownload', 'BtnOpenSource', 'SourceInfo', 'AdvancedOptions',
                'CmbConfig', 'TxtName', 'ChkClean', 'ChkCopySave', 'ChkLaunch', 'ChkKeep', 'ChkNotify', 'BtnBuild', 'BtnCancel',
                'StatusText', 'ElapsedText', 'Progress', 'DetailText', 'ResultPanel', 'BtnPlay', 'BtnOpen', 'LogExpander',
-               'LogBox', 'BuildsCard', 'BtnRefreshBuilds', 'BuildsMsg', 'BuildsList') {
+               'LogBox', 'BuildsCard', 'BtnRefreshBuilds', 'BuildsMsg', 'BuildsList', 'AppUpdateBar', 'AppUpdateText', 'BtnAppUpdate', 'BtnAppUpdateHide') {
     $ui[$n] = $window.FindName($n)
 }
 $ui.RootText.Text = $root
@@ -1173,7 +1189,39 @@ function Complete-Task([int]$code) {
                     Show-Failure 'Update' $code
                 }
             }
+            'appupdate' {
+                $info = $null
+                if ($state.UpdateJson) { try { $info = $state.UpdateJson | ConvertFrom-Json } catch { } }
+                if ($info -and $info.Status -eq 'updated') {
+                    $ui.Progress.Value = 100
+                    Set-Status "StepMania Windows Builder updated ($elapsed)" 'Ok'
+                    $ui.DetailText.Text = $info.Message
+                    $state.RestartInfo = $info
+                } elseif ($info -and $info.Status -eq 'uptodate') {
+                    $ui.Progress.Value = 100
+                    Set-Status 'StepMania Windows Builder is up to date' 'Ok'
+                    $ui.DetailText.Text = $info.Message
+                } elseif ($info -and $info.Message) {
+                    Set-Status 'The builder was not updated' 'Warn'
+                    $ui.DetailText.Text = $info.Message
+                    $ui.DetailText.ToolTip = $info.Message
+                    $ui.LogExpander.IsExpanded = $true
+                    [void](Show-Message $info.Message 'Warning')
+                } else {
+                    Show-Failure 'Builder update' $code
+                }
+            }
         }
+    }
+    if ($state.RestartInfo) {
+        # the new files are in place: the window restarts to load them
+        $info = $state.RestartInfo
+        $state.RestartInfo = $null
+        $msg = "$($info.Message)`n`nThe builder will now restart to use the new version."
+        if ($info.Backup) { $msg += "`n`nYou had changed some of the builder's own files; your versions were copied to:`n$($info.Backup)" }
+        [void](Show-Message $msg 'Information')
+        Restart-App
+        return
     }
     Update-Readiness
     if ($ui.ChkAdvanced.IsChecked) { Update-Builds }
@@ -1195,6 +1243,101 @@ function Start-Check {
 
 function Start-Update($info) {
     Start-Task 'update' "Updating $($info.Source)" 'update-source.ps1' @('-Source', ('"{0}"' -f $info.Path), '-Json')
+}
+
+# ---------------------------------------------------------------- updates of the builder itself
+# The check runs in its own background process (not as a task), so it never blocks a build and
+# the window stays responsive. Its result: the bar at the top, and the Updates box in Help.
+function Get-AppVersion {
+    $f = Join-Path $scriptsDir '.app-version.json'
+    try { if (Test-Path -LiteralPath $f) { $v = Get-Content -LiteralPath $f -Raw | ConvertFrom-Json; if ($v.Commit -match '^[0-9a-f]{40}$') { return $v } } } catch { }
+    return $null
+}
+
+$appTimer = New-Object System.Windows.Threading.DispatcherTimer
+$appTimer.Interval = [TimeSpan]::FromMilliseconds(300)
+$appTimer.add_Tick({
+    $c = $state.AppCheck
+    if (-not $c) { $appTimer.Stop(); return }
+    $line = $null
+    while ($c.Runner.Lines.TryDequeue([ref]$line)) { if ($line.StartsWith('##JSON ')) { $c.Json = $line.Substring(7) } }
+    if ($c.Runner.Finished -and $c.Runner.Lines.IsEmpty) {
+        $appTimer.Stop()
+        $state.AppCheck = $null
+        $info = $null
+        if ($c.Json) { try { $info = $c.Json | ConvertFrom-Json } catch { } }
+        $state.AppInfo = $info
+        $state.AppChecked = $true
+        if ($info -and $info.Status -eq 'available') { Show-AppUpdateBar $info }
+        elseif ($info -and $info.Status -eq 'uptodate') { $ui.AppUpdateBar.Visibility = 'Collapsed' }
+        Update-HelpVersion
+    }
+})
+
+function Start-AppCheck {
+    if ($state.AppCheck) { return }
+    $r = New-Object SmbRunner
+    $a = "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $scriptsDir 'update-app.ps1')`" -Check -Json"
+    try { $r.Start('powershell.exe', $a, $root, [Text.Encoding]::ASCII) } catch { return }
+    $state.AppCheck = @{ Runner = $r; Json = $null }
+    $appTimer.Start()
+    Update-HelpVersion
+}
+
+function Show-AppUpdateBar($info) {
+    $date = if ($info.Latest.Date) { ([string]$info.Latest.Date).Substring(0, 10) } else { '' }
+    $ui.AppUpdateText.Text = if ($info.Known -and [int]$info.NewCount -gt 0) {
+        "New version available: $($info.NewCount) new change(s), the latest from $date"
+    } else {
+        "New version available (latest change $date)"
+    }
+    $tip = @("Latest: $($info.Latest.Message)")
+    if (@($info.Changes).Count) { $tip += ''; $tip += @($info.Changes) }
+    $ui.AppUpdateText.ToolTip = $tip -join "`n"
+    $ui.AppUpdateBar.Visibility = 'Visible'
+}
+
+function Start-AppUpdate {
+    if ($state.Task) {
+        [void](Show-Message "Wait until '$($state.Task.Title)' finishes, then press Update again." 'Information')
+        return
+    }
+    $info = $state.AppInfo
+    $msg = "Update StepMania Windows Builder to the latest version?`n`n"
+    if ($info -and @($info.Changes).Count) { $msg += "What is new:`n" + ((@($info.Changes) | Select-Object -First 10 | ForEach-Object { "- $_" }) -join "`n") + "`n`n" }
+    $msg += "The builder restarts when it is done. The toolchain, your sources, builds and settings are not touched. " +
+            "If you changed any of the builder's own files, they are copied to app-backups\ first."
+    if ((Show-Message $msg 'Question' 'YesNo') -ne 'Yes') { return }
+    $ui.AppUpdateBar.Visibility = 'Collapsed'
+    Start-Task 'appupdate' 'Updating StepMania Windows Builder' 'update-app.ps1' @('-Json')
+}
+
+function Restart-App {
+    Save-Settings
+    Start-Process powershell.exe -WorkingDirectory $root -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden',
+                                                                         '-File', ('"{0}"' -f (Join-Path $scriptsDir 'gui.ps1')))
+    $window.Close()
+}
+
+function Update-HelpVersion {
+    # Refreshes the Updates box of the Help window, if it is open
+    if (-not $script:help) { return }
+    $c = $script:help.C
+    $v = Get-AppVersion
+    $c.VersionText.Text = if ($v) { "This copy: commit $($v.Commit.Substring(0, 7))$(if ($v.Date) { " ($($v.Date))" })" }
+                          else { 'This copy: unknown version' }
+    $c.BtnCheckApp.IsEnabled = -not $state.AppCheck
+    $c.BtnHelpUpdate.Visibility = 'Collapsed'
+    $s = $c.AppUpdateStatus
+    $s.Foreground = Get-PalBrush 'Text'
+    $s.Visibility = 'Visible'
+    $i = $state.AppInfo
+    if ($state.AppCheck) { $s.Text = 'Checking GitHub...' }
+    elseif (-not $state.AppChecked) { $s.Visibility = 'Collapsed' }
+    elseif (-not $i) { $s.Text = 'Could not check for updates (no answer from GitHub). Try again later.'; $s.Foreground = Get-PalBrush 'Warn' }
+    elseif ($i.Status -eq 'uptodate') { $s.Text = 'You have the latest version.'; $s.Foreground = Get-PalBrush 'Ok' }
+    elseif ($i.Status -eq 'available') { $s.Text = $i.Message; $c.BtnHelpUpdate.Visibility = 'Visible' }
+    else { $s.Text = $i.Message; $s.Foreground = Get-PalBrush 'Warn' }
 }
 
 function Show-UpdatesDialog($info) {
@@ -1338,6 +1481,53 @@ function Start-Toolchain([string]$which) {
     }
 }
 
+function Show-WelcomeDialog {
+    # First start: explains the toolchain and lets the user pick the optional Defender scan (off by default)
+    $wx = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="StepMania Windows Builder" Width="520" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="{DynamicResource Bg}" Foreground="{DynamicResource Text}">
+  <Window.Resources>
+$resources
+  </Window.Resources>
+  <StackPanel Margin="18">
+    <TextBlock x:Name="Heading" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10"/>
+    <TextBlock TextWrapping="Wrap" Margin="0,0,0,10"
+               Text="The builder needs its toolchain: the compilers that turn the source code into the game (Microsoft MSVC, the Windows SDK, CMake and Ninja)."/>
+    <TextBlock TextWrapping="Wrap" Margin="0,0,0,10" FontWeight="SemiBold" Foreground="{DynamicResource Warn}"
+               Text="Installing it is required: without the toolchain the builder cannot build anything."/>
+    <TextBlock TextWrapping="Wrap" Margin="0,0,0,2" Text="&#8226; It is downloaded once into this folder: about 600 MB, a few minutes."/>
+    <TextBlock TextWrapping="Wrap" Margin="0,0,0,2" Text="&#8226; Every file is checked (SHA-256 hashes and Microsoft signatures)."/>
+    <TextBlock TextWrapping="Wrap" Margin="0,0,0,14" Text="&#8226; Nothing is installed on Windows."/>
+    <Border Style="{StaticResource CardBox}" Padding="12,10" Margin="0,0,0,16">
+      <StackPanel>
+        <CheckBox x:Name="ChkScan" Content="Also scan the toolchain with Microsoft Defender (about 3 more minutes)" Margin="0"/>
+        <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="22,4,0,0"
+                   Text="Optional. Without it the files are still checked by their hashes and Microsoft signatures, but not scanned for malware. You can change it later in Advanced &gt; Defender scan."/>
+      </StackPanel>
+    </Border>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+      <Button x:Name="BtnInstall" Content="Install now" Style="{StaticResource AccentButton}" IsDefault="True" Margin="0,0,8,0"/>
+      <Button x:Name="BtnClose" Content="Close app" IsCancel="True"/>
+    </StackPanel>
+  </StackPanel>
+</Window>
+"@
+    $script:wel = @{ Win = (New-Window $wx); Result = @{ Install = $false; Defender = $false } }
+    $d = $script:wel.Win
+    $d.Owner = $window
+    $d.Icon = $window.Icon
+    Set-WindowTheme $d
+    $d.FindName('Heading').Text = if ($firstRun) { 'Welcome to StepMania Windows Builder!' } else { 'The toolchain is not installed' }
+    $script:wel.Chk = $d.FindName('ChkScan')
+    $script:wel.Chk.IsChecked = [bool]$ui.ChkDefender.IsChecked
+    $d.FindName('BtnInstall').add_Click({ $script:wel.Result.Install = $true; $script:wel.Win.Close() })
+    [void]$d.ShowDialog()
+    $script:wel.Result.Defender = [bool]$script:wel.Chk.IsChecked
+    return $script:wel.Result
+}
+
 function Show-DownloadDialog {
     $dx = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -1473,7 +1663,7 @@ function Show-Help {
     $hx = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="StepMania Windows Builder - Help" Width="620" Height="640" WindowStartupLocation="CenterOwner"
+        Title="StepMania Windows Builder - Help" Width="620" Height="700" WindowStartupLocation="CenterOwner"
         FontFamily="Segoe UI" FontSize="13" Background="{DynamicResource Bg}" Foreground="{DynamicResource Text}">
   <Window.Resources>
 $resources
@@ -1489,6 +1679,25 @@ $resources
         <Button x:Name="BtnClose" Content="Close" IsCancel="True"/>
       </StackPanel>
     </DockPanel>
+    <Border DockPanel.Dock="Bottom" Style="{StaticResource CardBox}" Padding="12,10" Margin="16,8,16,0">
+      <StackPanel>
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+            <Button x:Name="BtnHelpUpdate" Style="{StaticResource AccentButton}" Margin="0,0,8,0" Visibility="Collapsed" AutomationProperties.Name="Update now">
+              <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE896;"/><TextBlock Text="Update now"/></StackPanel>
+            </Button>
+            <Button x:Name="BtnCheckApp" Content="Check for updates"
+                    ToolTip="Compares this copy of the builder with the latest version on GitHub. Nothing is downloaded until you press Update."/>
+          </StackPanel>
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="Builder updates" FontWeight="SemiBold"/>
+            <TextBlock x:Name="VersionText" Style="{StaticResource MutedText}"/>
+          </StackPanel>
+        </DockPanel>
+        <TextBlock x:Name="AppUpdateStatus" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed"/>
+        <CheckBox x:Name="ChkAutoUpdate" Content="Check for updates when the app starts" Margin="0,8,0,0"/>
+      </StackPanel>
+    </Border>
     <ScrollViewer VerticalScrollBarVisibility="Auto">
       <StackPanel Margin="20,10,20,10">
         <TextBlock Style="{StaticResource H}" Text="How to use it" Margin="0,4,0,6"/>
@@ -1505,12 +1714,16 @@ $resources
         <TextBlock Style="{StaticResource P}"><Bold>Name</Bold> (Advanced): empty = the build folder has the same name as the source. With a name, it is source-name instead.</TextBlock>
         <TextBlock Style="{StaticResource P}"><Bold>Clean</Bold> (Advanced): throws away the build cache and compiles everything from zero. Only when something behaves strangely, or after moving the builder folder.</TextBlock>
         <TextBlock Style="{StaticResource P}"><Bold>Copy Save from the last build</Bold> (Advanced): copies preferences, profiles and scores from your newest previous build of the same source into the new one.</TextBlock>
-        <TextBlock Style="{StaticResource P}"><Bold>Defender scan</Bold> (Advanced): scans the toolchain with Microsoft Defender after Install or Verify. Skipping it is less secure.</TextBlock>
+        <TextBlock Style="{StaticResource P}"><Bold>Defender scan</Bold> (Advanced): scans the toolchain with Microsoft Defender after Install or Verify (about 3 minutes). Off by default; skipping it is less secure.</TextBlock>
 
         <TextBlock Style="{StaticResource H}" Text="Check updates"/>
         <TextBlock Style="{StaticResource P}">Compares the selected source with the latest commits of its repository on GitHub, without downloading anything. A window shows the new commits, the files and submodules they change, and the files you changed yourself. Press Update to get them, or Not now.</TextBlock>
         <TextBlock Style="{StaticResource P}">Updating never loses your work: the files you changed are first copied to source-backups\, then re-applied on top of the update. If the update changed the same lines, the updated file is kept and you are told which ones. Files you added (e.g. songs) are not touched.</TextBlock>
         <TextBlock Style="{StaticResource P}">It works for sources downloaded with Download... (or git) from GitHub. GitHub allows 60 checks per hour.</TextBlock>
+
+        <TextBlock Style="{StaticResource H}" Text="Builder updates"/>
+        <TextBlock Style="{StaticResource P}">When the app starts, it checks GitHub for a newer version of the builder itself (you can turn that off below). If there is one, a bar appears at the top: press Update. It downloads the new version, replaces the launcher, cli\, scripts\ and README.md, and restarts the app.</TextBlock>
+        <TextBlock Style="{StaticResource P}">The toolchain, your sources, builds, _work and settings are never touched. If you changed one of the builder's own files, your version is copied to app-backups\ first.</TextBlock>
 
         <TextBlock Style="{StaticResource H}" Text="Theme"/>
         <TextBlock Style="{StaticResource P}">Auto follows the app mode chosen in Windows settings (light or dark). Light and Dark force one of them.</TextBlock>
@@ -1537,6 +1750,18 @@ $resources
     $script:helpWin.FindName('BtnReadme').add_Click({ if (Test-Path -LiteralPath $readmeFile) { Start-Process notepad.exe -ArgumentList "`"$readmeFile`"" } })
     $script:helpWin.FindName('BtnShortcut').add_Click({ New-DesktopShortcut })
     $script:helpWin.Icon = $window.Icon
+    $script:help = @{ C = @{} }
+    foreach ($n in 'VersionText', 'AppUpdateStatus', 'BtnHelpUpdate', 'BtnCheckApp', 'ChkAutoUpdate') { $script:help.C[$n] = $script:helpWin.FindName($n) }
+    $script:help.C.ChkAutoUpdate.IsChecked = [bool]$settings.AutoUpdate
+    $script:help.C.ChkAutoUpdate.add_Checked({ $settings.AutoUpdate = $true; Save-Settings })
+    $script:help.C.ChkAutoUpdate.add_Unchecked({ $settings.AutoUpdate = $false; Save-Settings })
+    $script:help.C.BtnCheckApp.add_Click({ Start-AppCheck })
+    $script:help.C.BtnHelpUpdate.add_Click({
+        $script:helpWin.Close()
+        [void]$window.Dispatcher.BeginInvoke([Action]{ Start-AppUpdate })
+    })
+    $script:helpWin.add_Closed({ $script:help = $null })
+    Update-HelpVersion
     [void]$script:helpWin.ShowDialog()
 }
 
@@ -1609,6 +1834,8 @@ $ui.CmbSource.add_SelectionChanged({
     $state.LastSourceItem = $it
     Update-Readiness
 })
+$ui.BtnAppUpdate.add_Click({ Start-AppUpdate })
+$ui.BtnAppUpdateHide.add_Click({ $ui.AppUpdateBar.Visibility = 'Collapsed' })
 $ui.BtnBannerInstall.add_Click({ Start-Toolchain 'setup' })
 $ui.BtnBannerDownload.add_Click({ Start-Download })
 $ui.BtnInstall.add_Click({ Start-Toolchain 'setup' })
@@ -1631,27 +1858,32 @@ $window.add_Closing({
         if ((Show-Message "'$($state.Task.Title)' is still running. Stop it and close?" 'Warning' 'YesNo') -ne 'Yes') { $e.Cancel = $true; return }
         $state.Task.Runner.KillTree()
     }
+    if ($state.AppCheck) { try { $state.AppCheck.Runner.KillTree() } catch { } }
     Save-Settings
     if ($state.Notify) { $state.Notify.Dispose() }
 })
 
 $window.add_SourceInitialized({ Set-Theme })      # the title bar color needs the window handle
-try { $window.Icon = [Windows.Media.Imaging.BitmapFrame]::Create([Uri]$iconFile) } catch { }
+# Loaded from memory: reading it straight from the file would keep builder.ico locked while the window
+# is open, and the builder's own update could not replace it
+try {
+    $iconStream = New-Object IO.MemoryStream (, [IO.File]::ReadAllBytes($iconFile))
+    $window.Icon = [Windows.Media.Imaging.BitmapFrame]::Create($iconStream, 'None', 'OnLoad')
+} catch { }
 
-# First start without a toolchain: say what is needed and offer to install it right away
+# No toolchain (first start, or it was never installed): it is required, so install it now or close the app
 $window.add_ContentRendered({
     if ($script:welcomeDone) { return }
     $script:welcomeDone = $true
-    if ($firstRun -and -not (Test-Toolchain) -and -not $state.Task) {
-        $msg = "Welcome to StepMania Windows Builder!`n`n" +
-               "Before the first build, the builder needs its toolchain: the compilers that turn the source code into the game (Microsoft MSVC, the Windows SDK, CMake and Ninja).`n`n" +
-               "- It is downloaded once into this folder: about 600 MB, a few minutes (plus about 3 minutes of Microsoft Defender scan).`n" +
-               "- Every file is checked (SHA-256 hashes and Microsoft signatures).`n" +
-               "- Nothing is installed on Windows.`n`n" +
-               "Install it now?"
-        if ((Show-Message $msg 'Question' 'YesNo') -eq 'Yes') { Start-Toolchain 'setup' }
-        Save-Settings        # remembered: the welcome is shown only once
+    if (-not (Test-Toolchain) -and -not $state.Task) {
+        $w = Show-WelcomeDialog
+        $ui.ChkDefender.IsChecked = $w.Defender      # the choice is kept (Advanced > Defender scan)
+        Save-Settings
+        if (-not $w.Install) { $window.Close(); return }
+        Start-Toolchain 'setup'
     }
+    # Is there a newer version of the builder? (in the background; a bar appears only if there is)
+    if ($settings.AutoUpdate) { Start-AppCheck }
 })
 Update-AdvancedView
 Update-Sources
