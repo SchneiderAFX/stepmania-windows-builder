@@ -12,6 +12,12 @@
   Never touched: toolchain\, source\, your builds, _work\, source-backups\ and your settings
   (scripts\.gui-settings.json, scripts\.last-source).
 
+  What counts as a new version (for whoever publishes the builder):
+     - a commit that only changes documentation (*.md, e.g. README.md) does not: the new README
+       arrives with the next real update;
+     - a commit whose message contains [skip update] is not offered; the newest commit without
+       the mark is (so changes still in progress can be pushed without reaching anyone).
+
   How it knows its own version: scripts\.app-version.json (written by every update). Without it
   (e.g. a copy downloaded as a ZIP) it compares the files themselves with the latest commit.
   The GitHub API allows 60 checks per hour without an account.
@@ -105,10 +111,17 @@ function Get-LocalShas([string]$file) {
 function Test-SameFile([string]$rel, [string]$sha) {
     return ((Get-LocalShas (Join-Path $root ($rel -replace '/', '\'))) -contains $sha)
 }
-function Test-MatchesTree($tree) {
-    foreach ($k in $tree.Keys) { if (-not (Test-SameFile $k $tree[$k])) { return $false } }
+function Test-MatchesTree($tree, [switch]$CodeOnly) {
+    foreach ($k in $tree.Keys) {
+        if ($CodeOnly -and (Test-IsDoc $k)) { continue }
+        if (-not (Test-SameFile $k $tree[$k])) { return $false }
+    }
     return $true
 }
+# Documentation (README.md...) alone never makes a new version: it is updated with the next real one
+function Test-IsDoc([string]$p) { return $p -match '\.md$' }
+# "[skip update]" in a commit message: that commit is not offered as an update
+function Test-SkipMark($c) { return ([string]$c.commit.message) -match '(?i)\[skip update\]' }
 
 # ---------------------------------------------------------------- which version is this?
 function Read-LocalCommit {
@@ -139,60 +152,83 @@ function Save-Version($c) {
     [pscustomobject]@{ Commit = $c.Sha; Date = $c.Date; Message = $c.Message } | ConvertTo-Json | Set-Content -LiteralPath $versionFile -Encoding ascii
 }
 
-if (-not $Check) { Set-Steps 4; Step "Checking GitHub for the latest version" }
-$latestRaw = Invoke-GitHub "commits/$Branch"
-if (-not $latestRaw) { Stop-With 'error' "The repository github.com/$Repo (branch $Branch) was not found." }
-$latest = [ordered]@{
-    Sha     = [string]$latestRaw.sha
-    Short   = ([string]$latestRaw.sha).Substring(0, 7)
-    Date    = Format-When ([string]$latestRaw.commit.committer.date)
-    Message = (([string]$latestRaw.commit.message) -split "`n")[0].Trim()
-}
-$result.Latest = $latest
-
-$local = Read-LocalCommit
-$latestTree = $null
-if ($local -and $local.Commit -eq $latest.Sha) {
-    $result.Known = $true
-    $result.Local = [ordered]@{ Sha = $local.Commit; Short = $local.Commit.Substring(0, 7); Date = $local.Date }
-} else {
-    # Not recorded (or recorded as an older commit): maybe the files already are the latest ones
-    # (a fresh ZIP download, or copied by hand). Then remember it.
-    $latestTree = Get-AppTree $latest.Sha
-    if (-not $latestTree) { Stop-With 'error' 'Could not read the file list of the latest version from GitHub.' }
-    if (Test-MatchesTree $latestTree) {
-        $result.Known = $true
-        $result.Local = [ordered]@{ Sha = $latest.Sha; Short = $latest.Short; Date = $latest.Date }
-        Save-Version $latest
-        $local = [pscustomobject]@{ Commit = $latest.Sha }
+function Get-CommitInfo($c) {
+    return [ordered]@{
+        Sha     = [string]$c.sha
+        Short   = ([string]$c.sha).Substring(0, 7)
+        Date    = Format-When ([string]$c.commit.committer.date)
+        Message = (([string]$c.commit.message) -split "`n")[0].Trim()
     }
 }
-
-if ($local -and $local.Commit -eq $latest.Sha) {
+function Exit-UpToDate([string]$msg) {
     $result.Status = 'uptodate'
-    $result.Message = "StepMania Windows Builder is up to date (commit $($latest.Short), $($latest.Date))."
-    Write-Host $result.Message
+    $result.Message = $msg
+    Write-Host $msg
     if (-not $Check) { Ok 'Nothing to update' }
     Out-Result
     exit 0
 }
 
-# Something newer (or different) is on GitHub
-$result.Status = 'available'
-if ($local) {
+if (-not $Check) { Set-Steps 4; Step "Checking GitHub for the latest version" }
+$headRaw = Invoke-GitHub "commits/$Branch"
+if (-not $headRaw) { Stop-With 'error' "The repository github.com/$Repo (branch $Branch) was not found." }
+
+# A commit whose message contains [skip update] is not offered: the version offered is the newest
+# commit WITHOUT that mark (so it never includes the marked changes made after it).
+$targetRaw = $headRaw
+if (Test-SkipMark $headRaw) {
+    $targetRaw = $null
+    $list = Invoke-GitHub "commits?sha=$Branch&per_page=100"     # (in a variable: @(...) around the call would nest the array)
+    foreach ($c in $list) { if (-not (Test-SkipMark $c)) { $targetRaw = $c; break } }
+    if (-not $targetRaw) { Exit-UpToDate 'The latest changes on GitHub are marked [skip update]: there is no new version to offer.' }
+}
+$latest = Get-CommitInfo $targetRaw
+$result.Latest = $latest
+$local = Read-LocalCommit
+$latestTree = $null
+
+if ($local -and $local.Commit -eq $latest.Sha) {
     $result.Known = $true
     $result.Local = [ordered]@{ Sha = $local.Commit; Short = $local.Commit.Substring(0, 7); Date = [string]$local.Date }
-    $cmp = Invoke-GitHub "compare/$($local.Commit)...$($latest.Sha)"
-    if ($cmp) {
-        $result.NewCount = [int]$cmp.ahead_by
-        $result.Changes = @(@($cmp.commits) | Select-Object -Last 15 | ForEach-Object {
-            '{0}  {1}' -f (Format-When ([string]$_.commit.committer.date)).Substring(0, 10), (([string]$_.commit.message) -split "`n")[0].Trim()
-        })
-        [array]::Reverse($result.Changes)       # newest first
-    } else {
-        $result.Known = $false                  # that commit is not on GitHub (e.g. a local test copy)
-    }
+    Exit-UpToDate "StepMania Windows Builder is up to date (commit $($latest.Short), $($latest.Date))."
 }
+
+$cmp = if ($local) { Invoke-GitHub "compare/$($local.Commit)...$($latest.Sha)" } else { $null }
+if ($cmp) {
+    # This copy's version is known and on GitHub: look at what changed since then
+    $result.Known = $true
+    $result.Local = [ordered]@{ Sha = $local.Commit; Short = $local.Commit.Substring(0, 7); Date = [string]$local.Date }
+    if ([int]$cmp.ahead_by -eq 0) {
+        Exit-UpToDate "StepMania Windows Builder is up to date (commit $($result.Local.Short))."
+    }
+    $code = @(@($cmp.files) | ForEach-Object { $_.filename; $_.previous_filename } |
+              Where-Object { $_ -and (Test-AppPath $_) -and -not (Test-IsDoc $_) })
+    if (-not $code.Count) {
+        # only the README (or other documentation) changed: not worth an update; it comes with the next one
+        Exit-UpToDate "StepMania Windows Builder is up to date (commit $($result.Local.Short)). Only the documentation changed since then."
+    }
+    $visible = @(@($cmp.commits) | Where-Object { -not (Test-SkipMark $_) })
+    $result.NewCount = $visible.Count
+    $result.Changes = @($visible | Select-Object -Last 15 | ForEach-Object {
+        '{0}  {1}' -f (Format-When ([string]$_.commit.committer.date)).Substring(0, 10), (([string]$_.commit.message) -split "`n")[0].Trim()
+    })
+    [array]::Reverse($result.Changes)       # newest first
+} else {
+    # Version not recorded, or not on GitHub (e.g. a ZIP download, a copy made by hand, a test copy):
+    # compare the files themselves. Same program files = up to date (documentation does not count).
+    $latestTree = Get-AppTree $latest.Sha
+    if (-not $latestTree) { Stop-With 'error' 'Could not read the file list of the latest version from GitHub.' }
+    if (Test-MatchesTree $latestTree -CodeOnly) {
+        Save-Version $latest
+        $result.Known = $true
+        $result.Local = [ordered]@{ Sha = $latest.Sha; Short = $latest.Short; Date = $latest.Date }
+        Exit-UpToDate "StepMania Windows Builder is up to date (commit $($latest.Short), $($latest.Date))."
+    }
+    $local = $null
+}
+
+# Something newer (or different) is on GitHub
+$result.Status = 'available'
 $result.Message = if ($result.Known -and $result.NewCount -gt 0) {
     "A new version is available: $($result.NewCount) new change(s), the latest from $($latest.Date): $($latest.Message)"
 } else {

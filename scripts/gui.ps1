@@ -1724,6 +1724,7 @@ $resources
         <TextBlock Style="{StaticResource H}" Text="Builder updates"/>
         <TextBlock Style="{StaticResource P}">When the app starts, it checks GitHub for a newer version of the builder itself (you can turn that off below). If there is one, a bar appears at the top: press Update. It downloads the new version, replaces the launcher, cli\, scripts\ and README.md, and restarts the app.</TextBlock>
         <TextBlock Style="{StaticResource P}">The toolchain, your sources, builds, _work and settings are never touched. If you changed one of the builder's own files, your version is copied to app-backups\ first.</TextBlock>
+        <TextBlock Style="{StaticResource P}">Changes to the documentation alone (README) are not offered as an update: they arrive with the next one.</TextBlock>
 
         <TextBlock Style="{StaticResource H}" Text="Theme"/>
         <TextBlock Style="{StaticResource P}">Auto follows the app mode chosen in Windows settings (light or dark). Light and Dark force one of them.</TextBlock>

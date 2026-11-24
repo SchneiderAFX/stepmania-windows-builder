@@ -6,7 +6,8 @@
 
 A small Windows toolkit to build [StepMania](https://github.com/stepmania/stepmania), [ITGmania](https://github.com/itgmania/itgmania) or any StepMania Fork (except OutFox lol) from source and get a **clean, ready-to-play build folder**, without touching your original source and without installing Visual Studio or git.
 
-- **A window for everything** (`StepMania Builder.bat`): it guides you the first time (toolchain, then a source), builds with a progress bar, checks for updates, and has light and dark themes. The same steps are also available as `.bat` files in `cli\` for the console.
+- **A window for everything** (`StepMania Windows Builder.bat`): it guides you the first time (toolchain, then a source), builds with a progress bar, checks for updates, and has light and dark themes. The same steps are also available as `.bat` files in `cli\` for the console.
+- **Keeps itself up to date**: when it starts, it checks GitHub for a new version of the builder and updates itself with one click, without touching your toolchain, sources, builds or settings.
 - **Foolproof**: no source yet? The builder downloads StepMania, ITGmania or a fork for you.
 - Your source code is **never modified**.
 - Uses a **portable toolchain** (MSVC v143 + Windows SDK + CMake + Ninja) downloaded into this folder. Nothing is installed on your system.
@@ -23,8 +24,8 @@ A small Windows toolkit to build [StepMania](https://github.com/stepmania/stepma
 
 ## Quick start
 
-1. Double-click **`StepMania Builder.bat`**.
-2. The first time, it explains that it needs its **toolchain** (the compilers) and offers to install it: about 600 MB, once, every file checked, nothing installed on Windows. Say **Yes** (or press **Install toolchain** in the yellow note later).
+1. Double-click **`StepMania Windows Builder.bat`**.
+2. The first time, it explains that it needs its **toolchain** (the compilers) and that installing it is **required**: about 600 MB, once, every file checked, nothing installed on Windows. Press **Install now** (**Close app** closes the builder; the message appears again on the next start until the toolchain is installed). The optional **Microsoft Defender scan** of the toolchain (about 3 more minutes) is off by default: tick it in that same message if you want it.
 3. Press **Download a source...** and pick StepMania, ITGmania or the address of a fork. Each one goes into its own folder inside `source\`. (Already have one? Paste it into its own folder inside `source\` and press **Refresh**.)
 4. Press **Build**. When it finishes, press **Play**.
 
@@ -34,7 +35,7 @@ Each source has **one** build folder. Building again refreshes it and keeps its 
 
 To change the game's code: edit the files in its folder inside `.\source` and build again.
 
-Tip: **Help > Create desktop shortcut** puts a "StepMania Builder" icon on your desktop. To add another source later, choose **+ Download another source...** at the end of the Source list. The toolchain check (**Verify**) and the other maintenance options are under **Advanced**. More in [Graphical interface](#graphical-interface).
+Tip: **Help > Create desktop shortcut** puts a "StepMania Windows Builder" icon on your desktop. To add another source later, choose **+ Download another source...** at the end of the Source list. The toolchain check (**Verify**) and the other maintenance options are under **Advanced**. More in [Graphical interface](#graphical-interface).
 
 > **Do not use GitHub's "Download ZIP" button.** ZIP files do not include the git submodules (`extern\mbedtls`, `extern\libpng`...), so the build cannot work. Use **Download a source...** (it also downloads forks) or `git clone --recursive <URL>`. The builder detects a source without submodules and tells you how to fix it.
 
@@ -91,9 +92,9 @@ If the percentage or the spinner keeps moving, the script is working, even when 
 
 ## Graphical interface
 
-`StepMania Builder.bat` opens a window that does everything the `cli\` files do, with buttons instead of settings. It runs the same scripts underneath and needs nothing extra (it uses WPF, part of Windows). Hover any `(?)` mark for an explanation, or press **Help** for a short guide (Help also has **Create desktop shortcut**, which puts a "StepMania Builder" icon on your desktop; create it again if you move the folder). Your choices are remembered.
+`StepMania Windows Builder.bat` opens a window that does everything the `cli\` files do, with buttons instead of settings. It runs the same scripts underneath and needs nothing extra (it uses WPF, part of Windows). Hover any `(?)` mark for an explanation, or press **Help** for a short guide (Help also has **Create desktop shortcut**, which puts a "StepMania Windows Builder" icon on your desktop; create it again if you move the folder). Your choices are remembered.
 
-**First start**: if the toolchain is missing, a welcome message explains what it is and offers to install it. Until it is installed, and while there is no source, a yellow note at the top keeps explaining what is missing, with an **Install toolchain** and a **Download a source...** button. So you never need Advanced to get started.
+**First start**: if the toolchain is missing, a welcome message explains what it is and that it is **required**: **Install now** installs it, **Close app** closes the builder (the message comes back on the next start until the toolchain is installed). It also has the optional **Defender scan** checkbox (off by default; your choice is remembered). While there is no source, a yellow note at the top explains what is missing, with a **Download a source...** button (and **Install toolchain** if the install did not finish). So you never need Advanced to get started.
 
 **Compact mode** (the default) shows only what you do every time:
 
@@ -101,9 +102,10 @@ If the percentage or the spinner keeps moving, the script is working, even when 
 - **Launch the game when done**, **Keep _work** (keep the build cache so the next build is fast) and **Notify me when done** (a Windows notification when a task finishes or fails; click it to open the build folder).
 - **Build** shows the current step, a progress bar (with Ninja's `735/1335` counter while compiling) and the elapsed time. **Stop** cancels the running task and everything it started.
 - When it finishes: **Play** and **Open folder**. If it fails, the window shows the first error and opens **Details (log)** with the full output.
+
 **Advanced** (the checkbox at the top) adds setup and maintenance:
 
-- **Toolchain**: its status (Not installed / Installed / Verified on a date), **Install** (or **Repair** once installed) and **Verify**, with the **Defender scan** option.
+- **Toolchain**: its status (Not installed / Installed / Verified on a date), **Install** (or **Repair** once installed) and **Verify**, with the **Defender scan** option (off by default: it adds about 3 minutes; without it the files are still checked by hash and Microsoft signature, but not scanned for malware).
 - **Download...**: StepMania, ITGmania or the HTTPS address of a fork, into its own folder (you can choose the folder name). If that folder already exists, it asks whether to keep it and download with another name, or delete it and download again (it asks twice before deleting). A source pasted directly in `source\` is moved into its own folder first, after asking. **Open** opens the selected source folder.
 - Build options: **Config** (Release / Debug...), **Name** (adds a name to the output folder: `<source>-<name>`), **Clean** (rebuild everything; one time) and **Copy Save from the last build** (your preferences, profiles and scores go to the new build).
 - **Builds**: your finished builds with the commit each one was built from, marked **Outdated** (the source is now at a newer commit: press Build to update it), **Older copy** (a build left by an older version of the builder), **Source deleted** and **Has Save**. **Play**, **Open** and **Delete**. Delete always asks first, shows the build's date and size, warns if it is the current build of its source or has a Save, and moves it to the **Recycle Bin**.
@@ -117,6 +119,18 @@ If the percentage or the spinner keeps moving, the script is working, even when 
 3. your changes are re-applied. If the update changed the same lines, the updated file is kept and a message lists those files; your version is in the backup folder, ready to copy back.
 
 Files git does not track (e.g. songs you added) are never touched. It works for sources downloaded with **Download...** / `cli\2. get-source.bat` (or any git clone of a GitHub repository); a pasted copy or a ZIP has no git information to compare. GitHub allows 60 checks per hour without an account. The same is available from a console: `.\scripts\update-source.ps1 -Source <name> -Check` (or without `-Check` to update).
+
+**Builder updates**: every time it starts, the window checks GitHub (in the background) for a newer version of **the builder itself**. If there is one, a bar appears at the top with an **Update** button (hover its text to see what changed; **X** hides it until the next start). **Help** has a **Builder updates** box with the version you have, a **Check for updates** button, and the option to turn off the check at startup. Update:
+
+1. downloads the latest version from this repository on GitHub;
+2. copies any of the builder's own files that you changed to `app-backups\MMDDYYYY-HHMM\`;
+3. replaces the launcher, `cli\`, `scripts\` and this README, removes the files the new version no longer has, and restarts the window.
+
+It is all or nothing: if a file cannot be replaced (e.g. another program has it open), everything is put back as it was. Your toolchain, sources, builds, `_work`, `source-backups` and settings are never touched. From a console: `.\scripts\update-app.ps1 -Check` (or without `-Check` to update).
+
+What counts as a new version: every commit pushed to `main`, except
+- commits that only change documentation (`.md` files such as this README): they are not offered on their own, and arrive with the next real update;
+- commits whose message contains **`[skip update]`** (e.g. `work in progress [skip update]`): they are not offered. The version offered is the newest commit without the mark, so nothing from the marked commits reaches anyone until you push a commit without it.
 
 **Theme**: **Auto** (default) follows the light or dark app mode chosen in Windows settings, also when you change it while the window is open; **Light** and **Dark** force one of them. Every window of the builder (and its title bar) follows it.
 
@@ -151,7 +165,7 @@ set "RUN=0"
 
 ```
 builder-folder\
-  StepMania Builder.bat   <- opens the window: this is all most people need
+  StepMania Windows Builder.bat  <- opens the window: this is all most people need
   README.md
   source\                 <- your sources, one folder each (never modified by the builder)
     stepmania\            <-   e.g. StepMania
@@ -160,6 +174,7 @@ builder-folder\
   toolchain\              <- portable MSVC + SDK + CMake + Ninja (created by setup-toolchain)
   tools\git\              <- portable git, only if you had none (created by get-source)
   source-backups\         <- copies of the files you changed, made before each Check updates > Update
+  app-backups\            <- copies of the builder's own files you changed, made before each builder update
   _work\                  <- internal: working copy + build cache (you are asked after each build whether to delete it)
   stepmania-fixes\        <- the clean builds (output): one per source, same name as the source
   cli\                    <- the same steps for the console (each .bat has a SETTINGS section)
@@ -168,12 +183,15 @@ builder-folder\
     3. build.bat            <- step 3: builds the game
     verify-toolchain.bat    <- optional: checks the toolchain was not tampered with
   scripts\                <- the PowerShell scripts that do the work; do not delete
-                             (.last-source and .gui-settings.json in it remember your last choices)
+                             (.last-source and .gui-settings.json in it remember your last choices;
+                              .app-version.json and .app-files.txt remember the builder's version)
     build.ps1  get-source.ps1  setup-toolchain.ps1  verify-toolchain.ps1
-    gui.ps1               <- the window of StepMania Builder.bat
+    gui.ps1               <- the window of StepMania Windows Builder.bat
     update-source.ps1     <- Check updates / Update (compares a git source with GitHub)
+    update-app.ps1        <- Builder updates (updates the builder itself from GitHub)
     progress.ps1          <- shared helpers (progress bars, spinner)
     builder.ico           <- the builder's icon (window, taskbar, desktop shortcut)
+    builder-icon.svg      <- the same icon, editable
 ```
 
 The window and the `cli\` files use the same scripts, so you can mix them. Renaming the `.bat` files (e.g. removing the numbers) is fine. If you prefer PowerShell, the scripts can be run directly, e.g. `.\scripts\build.ps1 -Run`.
@@ -220,6 +238,10 @@ These options go after the `.bat` name (`"cli\3. build.bat" -Run`) or after `.\s
 
 `-Source <name or path>`, `-Check` (only compare, change nothing), `-Json` (also print the result as one `##JSON` line, used by the window).
 
+### `update-app` (PowerShell only: `.\scripts\update-app.ps1`)
+
+`-Check` (only compare this copy of the builder with the latest version on GitHub, change nothing), `-Json` (also print the result as one `##JSON` line, used by the window).
+
 ### `setup-toolchain` and `verify-toolchain`
 
 `setup-toolchain`: `-Defender ask|scan|skip` (`-SkipDefender` = `skip`), `-Force`, `-SdkVersion <n>`, `-MsvcMinor <14.xx>`, `-ToolchainDir <folder>`.
@@ -245,11 +267,13 @@ ITGmania keeps its own words: `1.3.0-BETA-git-8a3bf88-11182026`. For a git sourc
 1. checks the SHA-256 of every downloaded file against the Microsoft manifest or the GitHub API digest;
 2. checks that every downloaded MSI and every `.exe`/`.dll` extracted from MSVC and the SDK has a valid Authenticode signature from Microsoft Corporation (otherwise it aborts);
 3. writes `toolchain\inventory.json` with the SHA-256 of every file, so tampering can be detected later;
-4. scans the folder with Microsoft Defender, unless you choose to skip it when asked (or set `DEFENDER=skip`).
+4. optionally scans the folder with Microsoft Defender: in the window it is off by default (tick **Defender scan**); `cli\1. setup-toolchain.bat` asks you (or set `DEFENDER=scan` / `DEFENDER=skip`).
 
 `build.ps1` re-checks the key tools (`cl`, `link`, `rc`, `mt`, `cmake`, `ninja`) against the inventory before every build, and `cli\verify-toolchain.bat` checks the whole folder again (hashes, signatures and, unless skipped, a Defender scan).
 
 `get-source.ps1` clones the two official repositories, or a repository whose HTTPS address you type yourself (e.g. a fork), plus the submodules that repository declares. A repository you choose is code you decided to trust: the builder does not audit it. If it needs a portable git, it downloads MinGit from the official `git-for-windows/git` GitHub release and refuses to use it unless the SHA-256 published for that release matches.
+
+`update-app.ps1` (Builder updates) only talks to this repository on GitHub over HTTPS (`api.github.com` and `codeload.github.com`). It checks that the download contains every file of the new version before replacing anything.
 
 Notes:
 - The Windows SDK "Store Apps Tools" package is not installed in full (it contains unsigned MSIX/Store tools); only `rc.exe`, `rcdll.dll`, `mt.exe` and its dependency are kept.
@@ -261,12 +285,13 @@ Notes:
 | Item | Safe to delete? |
 |---|---|
 | `source\` and the folders inside it | **No**: it is your code (if you only downloaded one, you can download it again). Deleting one source folder is fine if you no longer need it; also delete its `_work\<name>\` to free space |
-| `StepMania Builder.bat` and the `scripts\` folder | **No** (only `scripts\.last-source` and `scripts\.gui-settings.json` can go: they only remember your last choices; without the settings file, the welcome message appears again) |
+| `StepMania Windows Builder.bat` and the `scripts\` folder | **No** (only `scripts\.last-source`, `scripts\.gui-settings.json`, `scripts\.app-version.json` and `scripts\.app-files.txt` can go: they only remember your last choices and the builder's version, which is found again by the next update check) |
 | `cli\` | Yes, if you only use the window (it only holds the console versions) |
 | `toolchain\` (`msvc`, `sdk`, `cmake`, `ninja`) | Not if you want to keep building (`cli\1. setup-toolchain.bat` can recreate it) |
 | `toolchain\inventory.json` | Not if you use the portable toolchain (`build.ps1` refuses to build without it, unless you pass `-SkipVerify`) |
 | `tools\git\` | Yes. It is downloaded again if you need it |
 | `source-backups\` | Yes, once you have copied back anything you need from it |
+| `app-backups\` | Yes, once you have copied back anything you need from it (your own changes to the builder's files) |
 | `_work\` | Yes (the builder offers to delete it after each build). It is regenerated; the next build is just slower because it compiles everything |
 | `toolchain\_downloads\` | Yes. Only a download cache |
 | `*.log` | Yes |
