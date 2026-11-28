@@ -25,6 +25,9 @@
     Cache, Logs, Screenshots and the files you added are kept). When the source moved to another
     commit, you are asked whether to update the build (-UpdateBuild yes|no answers it for you).
     Builds made by older versions of the builder (<name>-<commit>, <name>-MMDDYYYY-HHMM) are renamed.
+    4. The .exe and its debug symbols (.pdb) of every build are kept in .\symbols\<name>\ (the newest
+       -KeepSymbols builds), so that a crashinfo.txt can be turned into file:line with
+       "cli\4. symbolize crash.bat" (scripts\symbolize.ps1). They are not part of the clean build.
 
   Toolchain: uses the portable toolchain in .\toolchain if present (see setup-toolchain.ps1),
   otherwise falls back to an installed Visual Studio (2022 / toolset v143 required).
@@ -88,7 +91,12 @@ param(
     # commit: update that build (refreshed; its Save and the files you added are kept)?
     #   ask = ask before building (default; Enter or no console = yes)   yes = update   no = stop, build nothing
     [ValidateSet('ask', 'yes', 'no')]
-    [string]$UpdateBuild = 'ask'
+    [string]$UpdateBuild = 'ask',
+
+    # The .exe and .pdb of every build are kept in .\symbols\<source> (see symbolize.ps1).
+    # How many builds of each source to keep there; the oldest are removed. 0 = keep them all.
+    [ValidateRange(0, 10000)]
+    [int]$KeepSymbols = 20
 )
 
 $ErrorActionPreference = 'Stop'
@@ -555,19 +563,39 @@ if ($Clean -and (Test-Path $buildDir)) {
 $sw = [Diagnostics.Stopwatch]::StartNew()
 
 $stamp = Join-Path $buildDir '.source-commit'
+
+# Debug symbols (a .pdb next to the .exe) for Release and MinSizeRel too, so crash reports can be
+# turned into file:line (see symbolize.ps1). /Z7 only adds debug information: the code is the same.
+# /DEBUG turns off two linker optimizations, so /OPT:REF /OPT:ICF turn them back on.
+# Debug and RelWithDebInfo already make a .pdb. The rest are CMake's own defaults for these configs.
+$symbolFlags = @()
+if ($Config -eq 'Release' -or $Config -eq 'MinSizeRel') {
+    $opt = if ($Config -eq 'Release') { '/O2 /Ob2 /DNDEBUG' } else { '/O1 /Ob1 /DNDEBUG' }
+    $up  = $Config.ToUpper()
+    $symbolFlags = @("-DCMAKE_C_FLAGS_$up=$opt /Z7", "-DCMAKE_CXX_FLAGS_$up=$opt /Z7",
+                     "-DCMAKE_EXE_LINKER_FLAGS_$up=/INCREMENTAL:NO /DEBUG /OPT:REF /OPT:ICF")
+}
+# A build folder configured without these flags (older builder) is configured again
+$flagsStamp = Join-Path $buildDir '.builder-flags'
+$flagsWanted = "symbols-1 $($symbolFlags -join ' ')"
+
 $configure = $false
 if (-not (Test-Path (Join-Path $buildDir 'build.ninja'))) {
     if (Test-Path $buildDir) { Remove-Item $buildDir -Recurse -Force }   # leftovers of a failed configure
     $configure = $true
 } elseif ($commit -and ((Get-Content $stamp -ErrorAction SilentlyContinue) -ne $commit)) {
     $configure = $true    # the source moved to another commit: re-run CMake so the version stamp is updated
+} elseif ((Get-Content $flagsStamp -ErrorAction SilentlyContinue) -ne $flagsWanted) {
+    $configure = $true
+    Write-Host "`nThis build folder was made without debug symbols: the whole game is compiled again once (a few minutes)." -ForegroundColor Yellow
 }
 if ($configure) {
     Step "Configuring CMake ($Config)"
     Write-Host '    CMake inspects the project (about a minute). Its messages appear below.'
-    & $CMakeExe -S $stage -B $buildDir -G Ninja "-DCMAKE_BUILD_TYPE=$Config" "-DCMAKE_C_COMPILER=cl" "-DCMAKE_CXX_COMPILER=cl"
+    & $CMakeExe -S $stage -B $buildDir -G Ninja "-DCMAKE_BUILD_TYPE=$Config" "-DCMAKE_C_COMPILER=cl" "-DCMAKE_CXX_COMPILER=cl" @symbolFlags
     if ($LASTEXITCODE -ne 0) { throw "CMake configure failed (code $LASTEXITCODE)" }
     if ($commit) { Set-Content -Path $stamp -Value $commit -Encoding ascii }
+    Set-Content -Path $flagsStamp -Value $flagsWanted -Encoding ascii
     Ok 'Configured'
 } else {
     Step "Configuring CMake ($Config)"
@@ -600,6 +628,60 @@ $exe = Get-ChildItem (Join-Path $stage 'Program') -Filter '*.exe' -ErrorAction S
 if (-not $exe) { throw "Build succeeded, but no game .exe was found in $stage\Program" }
 
 Write-Host ("`nBuild OK in {0:mm\:ss}" -f $sw.Elapsed) -ForegroundColor Green
+
+# ---- Debug symbols of this build --------------------------------------------
+# Every build's .exe and .pdb are kept in symbols\<source>\, so a crashinfo.txt from any of them can be
+# turned into file:line later (scripts\symbolize.ps1). The folder is named after the date, the commit and
+# the image id (the .exe's link time and size, which a crash report of this builder's games prints).
+function Get-ImageId([string]$path) {
+    # TimeDateStamp + SizeOfImage from the PE headers, the way a symbol store names them
+    $fs = [IO.File]::OpenRead($path)
+    try {
+        $br = New-Object IO.BinaryReader $fs
+        $fs.Position = 0x3C; $pe = $br.ReadInt32()
+        $fs.Position = $pe + 8; $time = $br.ReadUInt32()
+        $fs.Position = $pe + 24 + 56; $size = $br.ReadUInt32()
+        return ('{0:X8}{1:x}' -f $time, $size)
+    } finally { $fs.Dispose() }
+}
+$pdb = [IO.Path]::ChangeExtension($exe.FullName, '.pdb')
+if (-not (Test-Path -LiteralPath $pdb)) {
+    Warn "No $(Split-Path $pdb -Leaf) was made: crash reports of this build can't be turned into file:line."
+} else {
+    $imageId = Get-ImageId $exe.FullName
+    $symRoot = Join-Path $Root "symbols\$srcName"
+    $already = Get-ChildItem -LiteralPath $symRoot -Directory -Filter "*_$imageId" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($already) {
+        Ok "Debug symbols already kept (nothing was relinked): symbols\$srcName\$($already.Name)"
+    } else {
+        $shortCommit = if ($commit) { ($commit -split '-')[0] } else { 'nogit' }
+        $symDir = Join-Path $symRoot ('{0}_{1}_{2}' -f (Get-Date).ToString('yyyyMMdd-HHmmss'), $shortCommit, $imageId)
+        New-Item -ItemType Directory -Force $symDir | Out-Null
+        Copy-Item -LiteralPath $exe.FullName, $pdb -Destination $symDir
+        # The version the crash report prints in its first line, from the generated version stub
+        $ver = @{}
+        $stub = Get-ChildItem (Join-Path $buildDir 'generated') -Recurse -Filter 'verstub.cpp' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($stub) {
+            foreach ($m in [regex]::Matches([IO.File]::ReadAllText($stub.FullName), '(\w+)\s*=\s*"([^"]*)"')) { $ver[$m.Groups[1].Value] = $m.Groups[2].Value }
+        }
+        [ordered]@{
+            Source = $srcName; Commit = $commit; Game = $exeName; Config = $Config; ImageId = $imageId
+            Build = $ver['sm_version_git_hash']; Version = $ver['product_version']
+            Compiled = if ($ver['version_date']) { "$($ver['version_date']) @ $($ver['version_time'])" } else { $null }
+            Built = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)
+        } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $symDir 'build-info.json') -Encoding ascii
+        $mbSym = [math]::Round((Get-ChildItem -LiteralPath $symDir -File | Measure-Object Length -Sum).Sum / 1MB)
+        Ok "Debug symbols kept: symbols\$srcName\$(Split-Path $symDir -Leaf)  ($mbSym MB)"
+
+        # Only the newest -KeepSymbols builds of this source (0 = all of them)
+        if ($KeepSymbols -gt 0) {
+            $old = @(Get-ChildItem -LiteralPath $symRoot -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'build-info.json') } |
+                     Sort-Object Name -Descending | Select-Object -Skip $KeepSymbols)
+            foreach ($o in $old) { Remove-Item -LiteralPath $o.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+            if ($old.Count) { Write-Host "    Removed the symbols of $($old.Count) older build(s) (-KeepSymbols $KeepSymbols)." }
+        }
+    }
+}
 
 # ---- 5. Package the clean build -------------------------------------------
 $finalExe = $exe.FullName; $finalDir = $stage

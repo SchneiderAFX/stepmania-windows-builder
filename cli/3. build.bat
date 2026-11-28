@@ -52,6 +52,11 @@ rem   no  = keep it without asking: the next build only recompiles what you chan
 rem         (much faster while you are testing changes in the code)
 set "DELETE_WORK=ask"
 
+rem The .exe and debug symbols (.pdb) of every build are kept in symbols\, so that a
+rem crashinfo.txt can be turned into file:line ("4. symbolize crash.bat"). How many builds
+rem of each source to keep there (the oldest are removed). 0 = keep them all.
+set "KEEP_SYMBOLS=20"
+
 rem Rebuild everything from scratch (slow). Needed once after moving/renaming this folder.
 set "CLEAN=0"
 
@@ -92,6 +97,7 @@ echo %* | findstr /i /c:"-NoPortable" >nul && set "NO_PORTABLE=0"
 echo %* | findstr /i /c:"-SkipVerify" >nul && set "SKIP_VERIFY=0"
 echo %* | findstr /i /c:"-KeepWork" >nul && set "DELETE_WORK="
 echo %* | findstr /i /c:"-DeleteWork" >nul && set "DELETE_WORK="
+echo %* | findstr /i /c:"-KeepSymbols" >nul && set "KEEP_SYMBOLS="
 
 set ARGS=
 if defined CONFIG set ARGS=%ARGS% -Config %CONFIG%
@@ -107,6 +113,7 @@ if "%NO_PACKAGE%"=="1" set ARGS=%ARGS% -NoPackage
 if "%NO_PORTABLE%"=="1" set ARGS=%ARGS% -NoPortable
 if "%SKIP_VERIFY%"=="1" set ARGS=%ARGS% -SkipVerify
 if defined DELETE_WORK set ARGS=%ARGS% -DeleteWork %DELETE_WORK%
+if defined KEEP_SYMBOLS set ARGS=%ARGS% -KeepSymbols %KEEP_SYMBOLS%
 
 echo Running: build.ps1 %ARGS% %*
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\scripts\build.ps1" %ARGS% %*

@@ -48,6 +48,7 @@ The same steps are in `cli\` as `.bat` files, for those who prefer a console or 
 | 1 | `cli\1. setup-toolchain.bat` | **Once**, to get the portable toolchain |
 | 2 | `cli\2. get-source.bat` | **Only if you do not have StepMania or ITGmania in `source\` yet**, or to add another one (it downloads it for you into its own folder). If you already pasted the source there, skip this step |
 | 3 | `cli\3. build.bat` | Every time you want to build |
+| 4 | `cli\4. symbolize crash.bat` | **Only when a game crashed**: turns its `crashinfo.txt` into file:line (see [Crash reports](#crash-reports)) |
 
 (`cli\verify-toolchain.bat` has no number: it is an optional check that you can run whenever you want.)
 
@@ -148,7 +149,7 @@ set "RUN=0"
 
 | File | Settings |
 |---|---|
-| `cli\3. build.bat` | `CONFIG`, `NAME`, `UPDATE_BUILD` (`ask`/`yes`/`no`), `SOURCE`, `DOWNLOAD`, `RUN`, `COPY_SAVE`, `CLEAN`, `SYNC_ONLY`, `NO_PACKAGE`, `NO_PORTABLE`, `SKIP_VERIFY`, `DELETE_WORK` (`ask`/`yes`/`no`), `PAUSE_AT_END` |
+| `cli\3. build.bat` | `CONFIG`, `NAME`, `UPDATE_BUILD` (`ask`/`yes`/`no`), `SOURCE`, `DOWNLOAD`, `RUN`, `COPY_SAVE`, `CLEAN`, `SYNC_ONLY`, `NO_PACKAGE`, `NO_PORTABLE`, `SKIP_VERIFY`, `DELETE_WORK` (`ask`/`yes`/`no`), `KEEP_SYMBOLS`, `PAUSE_AT_END` |
 | `cli\2. get-source.bat` | `GAME`, `REPO_URL`, `FOLDER_NAME`, `TARGET`, `FULL_HISTORY`, `USE_MINGIT`, `PAUSE_AT_END` |
 | `cli\1. setup-toolchain.bat` | `DEFENDER` (`ask`/`scan`/`skip`), `FORCE`, `SDK_VERSION`, `MSVC_MINOR`, `TOOLCHAIN_DIR`, `PAUSE_AT_END` |
 | `cli\verify-toolchain.bat` | `DEFENDER` (`ask`/`scan`/`skip`), `TOOLCHAIN_DIR`, `PAUSE_AT_END` |
@@ -176,16 +177,19 @@ builder-folder\
   source-backups\         <- copies of the files you changed, made before each Check updates > Update
   app-backups\            <- copies of the builder's own files you changed, made before each builder update
   _work\                  <- internal: working copy + build cache (you are asked after each build whether to delete it)
+  symbols\                <- the .exe and .pdb of every build, to turn crash reports into file:line
   stepmania-fixes\        <- the clean builds (output): one per source, same name as the source
   cli\                    <- the same steps for the console (each .bat has a SETTINGS section)
     1. setup-toolchain.bat  <- step 1: downloads and verifies the toolchain (once)
     2. get-source.bat       <- step 2: downloads StepMania, ITGmania or a fork into source\<name>
     3. build.bat            <- step 3: builds the game
+    4. symbolize crash.bat  <- turns a crashinfo.txt into file:line (drag the file onto it)
     verify-toolchain.bat    <- optional: checks the toolchain was not tampered with
   scripts\                <- the PowerShell scripts that do the work; do not delete
                              (.last-source and .gui-settings.json in it remember your last choices;
                               .app-version.json and .app-files.txt remember the builder's version)
     build.ps1  get-source.ps1  setup-toolchain.ps1  verify-toolchain.ps1
+    symbolize.ps1         <- turns a crashinfo.txt into file:line, with the kept symbols
     gui.ps1               <- the window of StepMania Windows Builder.bat
     update-source.ps1     <- Check updates / Update (compares a git source with GitHub)
     update-app.ps1        <- Builder updates (updates the builder itself from GitHub)
@@ -208,6 +212,16 @@ Each source has one build folder, with the same name as the source folder: build
 
 ITGmania's optional `Texture Font Generator.exe` is not built (it needs MFC, which is not part of the portable toolchain).
 
+## Crash reports
+
+When a game crashes it writes a `crashinfo.txt`. Its call stack is only addresses, such as `00007ff6ecedee21: StepMania!00007ff6ecb50000`. To know which line of code that is, you need the debug symbols (`.pdb`) of the **exact** build that crashed, so the builder keeps them:
+
+- Every build (Release and MinSizeRel too) makes a `.pdb`. It only adds debug information: the game's code is the same. The first build after updating the builder compiles everything again once.
+- The `.exe` and `.pdb` of each build are copied to `symbols\<source>\<date>_<commit>_<image id>\` (about 85 MB per build). The newest 20 builds of each source are kept (`-KeepSymbols` / `KEEP_SYMBOLS`; `0` = all). They are not part of the clean build.
+- Drag a `crashinfo.txt` onto `cli\4. symbolize crash.bat` (or run `.\scripts\symbolize.ps1 <path>`). Each address of the game gets its function and file:line, e.g. `-> RageDisplay::EndFrame + 0x41 (src\RageDisplay.cpp:412)`. The result is also saved next to the crash report as `crashinfo-symbolized.txt`.
+
+The right build is found by the `Image id` line of the crash report (the `.exe`'s link time and size). Sources that do not print it (StepMania 5.1, ITGmania) are matched by the version in the first line; several builds of the same commit can share it, and then the newest is used (the result warns that it may be the wrong one). Crash reports from games built elsewhere, or before the builder kept symbols, can't be symbolized this way.
+
 ## Command-line options
 
 These options go after the `.bat` name (`"cli\3. build.bat" -Run`) or after `.\scripts\build.ps1`.
@@ -229,6 +243,7 @@ These options go after the `.bat` name (`"cli\3. build.bat" -Run`) or after `.\s
 | `-SkipVerify` | Skip the quick integrity check of the toolchain before building |
 | `-CopySave` | Copy the `Save` folder (preferences, profiles, scores) of the newest previous build of the same source into the new build (only if the new build has no Save yet) |
 | `-DeleteWork ask\|yes\|no` | After a successful build: ask whether to delete `_work` (default; Enter = keep), delete it (`yes`: the next build compiles everything again), or keep it (`no`: the next build only recompiles what changed). `-KeepWork` = `no`. `_work` is always kept with `-SyncOnly` / `-NoPackage` and when the build fails |
+| `-KeepSymbols 20` | How many builds of each source keep their `.exe` and `.pdb` in `symbols\` (default 20; `0` = all). See [Crash reports](#crash-reports) |
 
 ### `get-source`
 
